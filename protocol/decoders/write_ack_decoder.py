@@ -1,0 +1,21 @@
+from dataclasses import dataclass
+from .base_decoder import BaseDecoder
+
+@dataclass
+class WriteAckTelemetry:
+    """0x31, 0x32, 0x43, 0x63, 0xB3, 0x20, 0x77, 0x78, 0x80, 0x81 寫入確認"""
+    cmd_echo: int
+    is_success: bool
+    raw_payload: bytes
+
+class WriteAckDecoder(BaseDecoder):
+    HANDLED_COMMANDS = {0x31, 0x32, 0x43, 0x63, 0xB3, 0x20, 0x77, 0x78, 0x80, 0x81}
+
+    @classmethod
+    def decode(cls, payload: bytes) -> WriteAckTelemetry:
+        cls._validate(payload)
+        return WriteAckTelemetry(
+            cmd_echo = payload[0],
+            is_success = True,
+            raw_payload = payload
+        )
