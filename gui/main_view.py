@@ -212,7 +212,7 @@ class MotorControlView:
         if axis_key and param_name and input_tag:
             dpg.set_value(input_tag, file_path)
             if axis_key in self.axis_panel_views:
-                self.axis_panel_views[axis_key]._on_param_changed(None, file_path, param_name)
+                self.axis_panel_views[axis_key]._on_param_changed_from_ui(param_name, file_path)
 
     def _on_global_estop_triggered(self, reason: str):
         self._pending_global_estop_reason = reason
