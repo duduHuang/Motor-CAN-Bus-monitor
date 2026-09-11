@@ -43,7 +43,8 @@ def main():
             print(f"  -> [MOCK Mode] 初始化虛擬馬達: {vm_key}")
             mock_engine = MockMotorCANEngine(node_id = m_id)
             controller = MockMotorController(engine = mock_engine)
-            rx_worker = MockMotorRxWorker(engine = mock_engine)
+            # 傳入 controller 讓 MockRxWorker 能將 RX 封包記錄至 can_logger
+            rx_worker = MockMotorRxWorker(engine = mock_engine, controller = controller)
 
             vm = MotorControlViewModel(controller = controller, rx_worker = rx_worker)
 
