@@ -249,6 +249,8 @@ class MotorControlView:
         if (cur_w, cur_h) != (self.last_win_width, self.last_win_height):
             self.last_win_width, self.last_win_height = cur_w, cur_h
             dpg.set_viewport_title(f"{self.base_title} ({cur_w}x{cur_h})")
+            # 當使用者拉動視窗時，執行等比例高度與寬度動態計算
+            self._handle_layout_resize(cur_w, cur_h)
 
         self.master_header.update()
 
@@ -280,3 +282,20 @@ class MotorControlView:
                         cur_t = times[-1]
                         w_s = plot_opts["window_size"]
                         self.summary_view.set_x_limits(max(0.0, float(cur_t - w_s)), max(float(w_s), float(cur_t)))
+
+    def _handle_layout_resize(self, cur_w: int, cur_h: int):
+        """計算並配發各個 View 的動態尺寸，確保左右兩側高度精確對齊"""
+        # 扣除頂部 Header (~80px)、TabBar 與 Padding (~40px)
+        usable_h = max(400, cur_h - 120)
+        
+        # 1. 計算左側面板動態寬度 (佔全寬 ~22%，最小 280px)
+        left_w = max(280, int(cur_w * 0.22))
+        
+        # 控制中間 3 張波形圖的高度 (約佔總可用高度的 55%)
+        plot_single_h = max(90, int((usable_h * 0.55) / 3))
+
+        for key in self.manager.get_all_vms().keys():
+            if key in self.axis_panel_views:
+                self.axis_panel_views[key].on_resize(left_w)
+            if key in self.axis_plot_views:
+                self.axis_plot_views[key].on_resize(plot_single_h)

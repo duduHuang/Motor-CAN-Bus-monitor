@@ -9,6 +9,9 @@ class AxisPlotsView:
         self.plot_height = plot_height
         self.themes = themes if themes is not None else {}
         self.tags = {
+            "plot_pos": dpg.generate_uuid(), #  圖表 1 Tag
+            "plot_vel": dpg.generate_uuid(), #  圖表 2 Tag
+            "plot_trq": dpg.generate_uuid(), #  圖表 3 Tag
             "xaxis_pos": dpg.generate_uuid(), "yaxis_pos": dpg.generate_uuid(),
             "xaxis_vel": dpg.generate_uuid(), "yaxis_vel": dpg.generate_uuid(),
             "xaxis_trq": dpg.generate_uuid(), "yaxis_trq": dpg.generate_uuid(),
@@ -48,6 +51,12 @@ class AxisPlotsView:
             dpg.add_line_series([], [], label="Actual (t_act)", parent=self.tags["yaxis_trq"], tag=self.tags["series_trq_act"])
             if "theme_t_ff" in self.themes: dpg.bind_item_theme(self.tags["series_trq_ff"], self.themes["theme_t_ff"])
             if "theme_t_act" in self.themes: dpg.bind_item_theme(self.tags["series_trq_act"], self.themes["theme_t_act"])
+
+    def on_resize(self, plot_height: int):
+        """動態調整三組波形圖的高度"""
+        for p_key in ["plot_pos", "plot_vel", "plot_trq"]:
+            if dpg.does_item_exist(self.tags[p_key]):
+                dpg.configure_item(self.tags[p_key], height=plot_height)
 
     def update(
         self, 

@@ -7,6 +7,7 @@ class AxisDashboardView:
     def __init__(self, key: str = ""):
         self.key = key
         self.tags = {
+            "main_win": dpg.generate_uuid(),
             "pos_val": dpg.generate_uuid(),
             "spd_val": dpg.generate_uuid(),
             "cur_val": dpg.generate_uuid(),
@@ -22,7 +23,7 @@ class AxisDashboardView:
     def build(self):
         """建構 UI 佈局"""
         # 將 height 稍微調高至 115，騰出空間給下方的錯誤訊息列
-        with dpg.child_window(height=115, border=True):
+        with dpg.child_window(tag=self.tags["main_win"], width=-1, height=115, border=True):
             with dpg.group(horizontal=True):
                 # 1. 角度 (Position)
                 with dpg.group():
@@ -59,6 +60,11 @@ class AxisDashboardView:
                 dpg.add_text("STATUS: IDLE", tag=self.tags["status_txt"], color=(200, 200, 200))
                 dpg.add_spacer(width=15)
                 dpg.add_text("", tag=self.tags["err_txt"], color=(255, 100, 100))
+
+    def on_resize(self, height: int):
+        """動態調整看板高度"""
+        if dpg.does_item_exist(self.tags["main_win"]):
+            dpg.configure_item(self.tags["main_win"], height=height)
 
     def update(self, snap: ControlSnapshot):
         """根據 ViewModel 快照更新數值"""

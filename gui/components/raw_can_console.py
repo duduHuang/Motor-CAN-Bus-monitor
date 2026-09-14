@@ -8,6 +8,7 @@ class RawCanConsoleView:
     def __init__(self, key: str = ""):
         self.key = key
         self.tags = {
+            "main_win": dpg.generate_uuid(),
             "container": dpg.generate_uuid(),
             "log_text": dpg.generate_uuid(),
             "auto_scroll": dpg.generate_uuid(),
@@ -19,7 +20,7 @@ class RawCanConsoleView:
 
     def build(self):
         """建構 UI 佈局"""
-        with dpg.child_window(height=-1, border=True):
+        with dpg.child_window(tag=self.tags["main_win"], width=-1, height=-1, border=True):
             # 頂部控制列
             with dpg.group(horizontal=True):
                 dpg.add_text("Raw CAN Console", color=(100, 200, 255))
@@ -27,8 +28,13 @@ class RawCanConsoleView:
                 dpg.add_button(label="Clear", tag=self.tags["clear_btn"], callback=self.clear_logs)
 
             # 滾動內容區
-            with dpg.child_window(tag=self.tags["container"], border=True, horizontal_scrollbar=True):
+            with dpg.child_window(tag=self.tags["container"], width=-1, height=-1, border=True, horizontal_scrollbar=True):
                 dpg.add_text("", tag=self.tags["log_text"])
+
+    def on_resize(self, height: int):
+        """動態調整 Console 主高度"""
+        if dpg.does_item_exist(self.tags["main_win"]):
+            dpg.configure_item(self.tags["main_win"], height=height)
 
     def clear_logs(self):
         """清空 UI 上的 Log 顯示"""

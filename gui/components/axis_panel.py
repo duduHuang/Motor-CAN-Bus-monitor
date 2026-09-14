@@ -1,3 +1,4 @@
+# gui/components/axis_panel.py
 import os
 import time
 from typing import Dict, Any, Callable
@@ -29,6 +30,7 @@ class AxisPanelView:
         self.current_params: Dict[str, Any] = {}
         self.active_provider_ui = None  # 保存當前 ProviderUI 實例
         self.tags = {
+            "main_win": dpg.generate_uuid(),
             "provider_combo": dpg.generate_uuid(),
             "params_group": dpg.generate_uuid(),
             "auto_scroll": dpg.generate_uuid(),
@@ -50,7 +52,7 @@ class AxisPanelView:
     def build(self):
         default_provider_name = self._get_or_init_default_provider_name()
 
-        with dpg.child_window(width=350, border=True):
+        with dpg.child_window(tag=self.tags["main_win"], width=350, height=-1, border=True):
             dpg.add_text("Control & Settings", color=(100, 200, 255))
             dpg.add_separator()
 
@@ -103,6 +105,11 @@ class AxisPanelView:
             dpg.bind_item_theme(estop_btn, self.estop_theme)
 
         self._rebuild_provider_params(default_provider_name)
+
+    def on_resize(self, width: int):
+        """動態調整左側控制面板寬度"""
+        if dpg.does_item_exist(self.tags["main_win"]):
+            dpg.configure_item(self.tags["main_win"], width=width)
 
     def get_plot_settings(self) -> Dict[str, Any]:
         return {
