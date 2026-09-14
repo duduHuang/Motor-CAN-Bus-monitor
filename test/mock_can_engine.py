@@ -1,3 +1,8 @@
+# test/mock_can_engine.py
+"""
+MockMotorCANEngine Module
+提供模擬馬達物理引擎、控制器與背景接收 Worker，用於單元測試與 Headless 自動化測試。
+"""
 import threading
 import time
 import math

@@ -1,3 +1,8 @@
+# protocol/system_command.py
+"""
+SystemCommandEncoder Module
+定義系統與其他配置指令的封包編碼器 (SystemCommandEncoder)，提供外部 (如 AxisPanelView) 主動生成對應的 CAN 封包的介面。
+"""
 from .base_command import BaseCommandEncoder
 
 class SystemCommandEncoder(BaseCommandEncoder):

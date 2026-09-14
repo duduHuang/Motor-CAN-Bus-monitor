@@ -1,3 +1,8 @@
+# protocol/decoders/base_decoder.py
+"""
+BaseDecoder Module
+所有通訊解碼器的抽象基類 (基於 Command Echo 自動派發)
+"""
 from abc import ABC, abstractmethod
 from typing import ClassVar, Dict, Type, Any
 import struct

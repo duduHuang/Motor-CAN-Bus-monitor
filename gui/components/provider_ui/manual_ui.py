@@ -1,3 +1,8 @@
+# gui/components/provider_ui/manual_ui.py
++"""
++ManualProviderUI Module
++專屬於 Manual Provider 的 UI 元件，提供即時控制滑桿與快捷微調按鈕，方便使用者直接調整目標位置、速度、剛度、阻尼與前饋力矩。
++"""
 import dearpygui.dearpygui as dpg
 from .base_ui import BaseProviderUI
 

@@ -1,3 +1,8 @@
+# gui/components/master_header.py
++"""
++MasterHeaderView Module
++頂部 Master 工具列面板 View 元件，提供全域啟動/停止、全域緊急停止按鈕，以及全域狀態顯示。
++"""
 import dearpygui.dearpygui as dpg
 from core import SystemStatus, MultiMotorViewModelManager
 

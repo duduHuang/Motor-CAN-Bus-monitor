@@ -1,3 +1,8 @@
+# protocol/__init__.py
+"""
+MotorProtocol Module
+統一對外發送指令門面 (包含伺服指令與 MIT 模式壓碼)，並提供對應的解碼器模組 (Decoder)
+"""
 from .param_command import ParamCommandEncoder
 from .read_command import ReadCommandEncoder
 from .motion_command import MotionCommandEncoder

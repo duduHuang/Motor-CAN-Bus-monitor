@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+plot_mit_log.py
+繪製 MIT 控制跟隨圖表
+"""
 import sys
 import os
 import pandas as pd

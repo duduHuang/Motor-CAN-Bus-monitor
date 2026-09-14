@@ -1,4 +1,7 @@
 # gui/main_view.py
+"""
+Main GUI View for Motor CAN Bus Monitor
+"""
 import time
 from typing import Dict, Any
 import dearpygui.dearpygui as dpg

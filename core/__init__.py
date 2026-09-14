@@ -1,3 +1,7 @@
+#core/__init__.py
+"""
+Core Modules for Motor CAN Bus Monitor
+"""
 from .motor_controller import MotorController, ParsedCANMessage
 from .motor_control_viewmodel import MotorControlViewModel, SystemStatus, ControlSnapshot
 from .rx_worker import MotorRxWorker

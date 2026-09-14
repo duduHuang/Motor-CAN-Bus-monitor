@@ -1,4 +1,13 @@
 # gui/components/axis_panel.py
+"""
+AxisPanelView Module
+單軸左側控制與設定面板 View 元件，提供：
+- Motor ID 設定
+- Provider 選擇與參數設定
+- 波形圖設定（自動捲動、視窗大小）
+- CSV 匯出、報告生成、波形圖存檔
+- 啟動/停止控制與緊急停止按鈕
+"""
 import os
 import time
 from typing import Dict, Any, Callable

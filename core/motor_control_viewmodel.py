@@ -1,3 +1,4 @@
+#core/motor_control_viewmodel.py
 """
 MotorControlViewModel Module
 針對 DearPyGui 與 CAN Bus MIT 控制模式設計的 ViewModel 層。

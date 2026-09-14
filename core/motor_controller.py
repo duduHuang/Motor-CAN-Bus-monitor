@@ -1,3 +1,8 @@
+#core/motor_controller.py
+"""
+MotorController Module
+業務邏輯與匯流排傳輸管理層，負責 CAN Bus 封包的發送、接收與動態解碼，並提供單機、多機與運動模式的統一控制介面。
+"""
 from dataclasses import dataclass
 import time
 from typing import Any, Optional

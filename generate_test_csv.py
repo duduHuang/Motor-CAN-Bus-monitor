@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+generate_test_csv.py
+生成測試軌跡 CSV 檔案，供 Motor-CAN-Bus-monitor 測試使用。
+"""
 import csv
 import math
 

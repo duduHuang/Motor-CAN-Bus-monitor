@@ -1,4 +1,9 @@
 # gui/components/axis_dashboard.py
+"""
+AxisDashboardView Module
+單軸頂部即時狀態看板 View，顯示五大數值 (角度、轉速、電流、溫度、電壓)
+以及系統狀態與錯誤訊息，提供外部 (如 AxisPanelView) 主動寫入自訂錯誤與提醒訊息的介面。
+"""
 import dearpygui.dearpygui as dpg
 from core import SystemStatus, ControlSnapshot
 

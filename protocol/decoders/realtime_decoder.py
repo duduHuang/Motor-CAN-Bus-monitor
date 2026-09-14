@@ -1,3 +1,10 @@
+# protocol/decoders/realtime_decoder.py
+"""
+RealtimeMotionDecoder Module
+解析單軸即時運動控制的回傳封包，包含：
+- StandardMotionTelemetry: 0x9C, 0xA1, 0xA2, 0xA4, 0xA8, 0xA9, 0x72, 0x73
+- SingleTurnMotionTelemetry: 0xA6
+"""
 from dataclasses import dataclass
 from typing import Union
 from .base_decoder import BaseDecoder

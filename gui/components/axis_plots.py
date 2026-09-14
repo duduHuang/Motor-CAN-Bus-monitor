@@ -1,3 +1,8 @@
+# gui/components/axis_plots.py
++"""
++AxisPlotsView Module
++單軸跟隨波形面板 View 元件 (包含 3 組 DPG Plot)，提供即時刷新波形數據與座標軸自適應功能，並支援自動捲動或自動縮放 X 軸
++"""
 from typing import List, Tuple, Dict
 import dearpygui.dearpygui as dpg
 

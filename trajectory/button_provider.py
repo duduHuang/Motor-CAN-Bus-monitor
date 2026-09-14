@@ -1,9 +1,13 @@
+# trajectory/button_provider.py
+"""
+ButtonTrajectoryProvider 模組
+提供 UI 方向鈕即時調參軌跡與增益的 Provider
+"""
 from typing import Any, List, Union
 from trajectory.base import BaseTrajectoryProvider, ParamSchema, TrajectoryPoint
 
-
 class ButtonTrajectoryProvider(BaseTrajectoryProvider):
-    """ UI 方向鈕即時調參軌跡與增益提供者。"""
+    """ UI 方向鈕即時調參軌跡與增益提供者。 """
 
     def __init__(
         self,

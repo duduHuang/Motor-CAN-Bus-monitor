@@ -1,3 +1,4 @@
+# test/test_headless_suite.py
 """
 Headless 自動化測試套件
 直接鏈接並驗證真實的 MotorControlViewModel 與 ProviderFactory。
@@ -10,7 +11,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor, wait
 
 from mock_can_engine import MockMotorCANEngine, MockMotorController, MockMotorRxWorker
-from Documents.single_motor.single_motor.core.motor_control_viewmodel import MotorControlViewModel, SystemStatus
+from core import MotorControlViewModel, SystemStatus
 from trajectory import ProviderFactory
 
 

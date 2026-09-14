@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+interpolate.py
+進行軌跡插值與平滑處理。
+"""
 import numpy as np
 import pandas as pd
 from scipy.interpolate import PchipInterpolator

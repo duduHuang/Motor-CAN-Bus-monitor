@@ -1,3 +1,8 @@
+# protocol/base_command.py
+"""
+BaseCommandEncoder Module
+單機控制指令基類：處理 8-Byte Payload 填充與格式化
+"""
 import struct
 from abc import ABC
 

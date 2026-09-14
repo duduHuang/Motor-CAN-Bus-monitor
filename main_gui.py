@@ -1,4 +1,7 @@
 # main_gui.py
+"""
+Main GUI for Multi-Axis Motor Control
+"""
 import sys
 import argparse
 from typing import Dict, List, Tuple

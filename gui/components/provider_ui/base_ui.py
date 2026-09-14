@@ -1,3 +1,8 @@
+# gui/components/provider_ui/base_ui.py
++"""
++BaseProviderUI Module
++定義所有 Provider UI 的基底抽象類別，提供建構、更新與參數變更回調的統一介面。
++"""
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, List, Optional
 from trajectory.base import ParamSchema

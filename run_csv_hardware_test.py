@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 """
+run_csv_hardware_test.py
 動態多軸 CSV 軌跡追蹤測試腳本 (MVVM 架構)
 支援 1~3 顆馬達動態載入、物理前饋模型自動匹配與聯鎖急停保護
 """

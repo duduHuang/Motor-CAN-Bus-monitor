@@ -1,3 +1,8 @@
+# protocol/param_command.py
+"""
+ParamCommandEncoder Module
+單軸參數讀取與寫入指令集 (0x30 ~ 0xB4)
+"""
 from .base_command import BaseCommandEncoder
 
 class ParamCommandEncoder(BaseCommandEncoder):

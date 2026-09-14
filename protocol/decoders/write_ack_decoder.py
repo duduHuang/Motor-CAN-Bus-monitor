@@ -1,3 +1,8 @@
+# protocol/decoders/write_ack_decoder.py
+"""
+WriteAckDecoder Module
+解碼器模組，負責解析單軸寫入指令的確認回應封包，並將其轉換為對應的資料結構 (Telemetry)。
+"""
 from dataclasses import dataclass
 from .base_decoder import BaseDecoder
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 多軸正弦波 (Sine Wave) 軌跡追蹤驗證腳本 (MVVM 架構)
 套用先前 CSV 調校出的最佳 Kp, Kd 增益與站姿偏置，支援動態控管 1~3 顆馬達

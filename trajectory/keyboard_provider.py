@@ -1,6 +1,10 @@
+# trajectory/keyboard_provider.py
+"""
+鍵盤即時調參軌跡提供者模組
+提供透過鍵盤控制即時調整軌跡參數的功能。
+"""
 from typing import Any, Dict, List, Tuple, Union
 from trajectory.base import BaseTrajectoryProvider, ParamSchema, TrajectoryPoint
-
 
 class AxisState:
     """單軸狀態封裝容器"""

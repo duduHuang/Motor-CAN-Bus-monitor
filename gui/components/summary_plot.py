@@ -1,3 +1,8 @@
+# gui/components/summary_plot.py
++"""
++AllAxesSummaryView Module
++多軸總覽波形 View 元件，顯示各軸的實際位置與目標位置波形，提供外部 (如 MultiMotorPanelView) 主動更新各軸波形數據的介面。
++"""
 from typing import Dict, List
 import dearpygui.dearpygui as dpg
 from core import MultiMotorViewModelManager

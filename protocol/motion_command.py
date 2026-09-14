@@ -1,3 +1,8 @@
+# protocol/motion_command.py
+"""
+MotionCommandEncoder Module
+定義單軸運動與控制指令的封包編碼器 (MotionCommandEncoder)，提供外部 (如 AxisPanelView) 主動生成對應的 CAN 封包的介面。
+"""
 from .base_command import BaseCommandEncoder
 
 class MotionCommandEncoder(BaseCommandEncoder):

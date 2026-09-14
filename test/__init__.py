@@ -1,3 +1,4 @@
+# test/__init__.py
 """
 Test Package
 提供 Mock CAN Bus 模擬組件與 Headless 自動化測試集進入點。

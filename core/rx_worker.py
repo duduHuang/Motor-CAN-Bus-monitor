@@ -1,3 +1,8 @@
+#core/rx_worker.py
+"""
+MotorRxWorker Module
+背景 CAN 接收與實時狀態維護 Worker (Thread-Safe)
+"""
 import threading
 from typing import Callable, Dict, Optional
 from collections import deque

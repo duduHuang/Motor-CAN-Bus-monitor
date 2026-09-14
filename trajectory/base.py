@@ -1,3 +1,8 @@
+# trajectory/base.py
+"""
+軌跡生成器基類模組
+提供軌跡生成器的抽象基類與相關資料結構。
+"""
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, List, Optional, Type

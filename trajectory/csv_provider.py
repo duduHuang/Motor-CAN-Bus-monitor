@@ -1,3 +1,8 @@
+# trajectory/csv_provider.py
+"""
+CSV 檔案軌跡播放器模組
+提供 CSV 檔案格式的軌跡數據播放功能。
+"""
 import csv
 import os
 import threading

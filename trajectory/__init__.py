@@ -1,3 +1,8 @@
+# trajectory/__init__.py
+"""
+軌跡生成器模組
+提供各種軌跡生成器的接口與實現。
+"""
 from .base import BaseTrajectoryProvider, ParamSchema, TrajectoryPoint
 from .csv_provider import CsvTrajectoryProvider
 from .factory import ProviderFactory

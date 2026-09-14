@@ -1,3 +1,7 @@
+# protocol/decoders/__init__.py
+"""
+Decoder Modules for Handling Different Types of CAN Messages
+"""
 from .base_decoder import BaseDecoder
 from .realtime_decoder import RealtimeMotionDecoder, StandardMotionTelemetry, SingleTurnMotionTelemetry
 from .sensor_decoder import SensorDataDecoder, SensorStatus1Telemetry, SensorStatus3Telemetry, ErrorStatusFlags

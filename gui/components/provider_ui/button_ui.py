@@ -1,3 +1,8 @@
+# gui/components/provider_ui/button_ui.py
++"""
++ButtonProviderUI Module
++專屬於 Button Provider 的 UI 元件，提供即時狀態�顯示與十字方向控制按鈕面板。
++"""
 import dearpygui.dearpygui as dpg
 from .base_ui import BaseProviderUI
 from core import ControlSnapshot

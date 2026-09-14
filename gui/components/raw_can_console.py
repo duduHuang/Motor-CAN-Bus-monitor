@@ -1,4 +1,8 @@
 # gui/components/raw_can_console.py
+"""
+RawCanConsoleView Module
+單軸原始 CAN 封包通訊 Log 終端元件 View (支援環形緩衝區無限更新)，提供外部 (如 AxisPanelView) 主動寫入自訂錯誤與提醒訊息的介面。
+"""
 import dearpygui.dearpygui as dpg
 from core import ControlSnapshot
 

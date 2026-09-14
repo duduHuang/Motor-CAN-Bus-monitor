@@ -1,3 +1,8 @@
+# protocol/mit_command.py
+"""
+MIT Command Module
+定義 MIT 模式下的控制指令 (MITCommand) 與回傳數據 (MITTelemetry) 的資料結構，以及對應的編解碼器 (MITCommandEncoder, MITTelemetryDecoder)。
+"""
 from dataclasses import dataclass
 
 @dataclass

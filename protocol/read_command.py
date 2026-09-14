@@ -1,3 +1,8 @@
+# protocol/read_command.py
+"""
+ReadCommandEncoder Module
+單軸讀取指令模組：提供對應的封包構建函式，將指令碼與參數轉換為 8-Byte Payload。
+"""
 from .base_command import BaseCommandEncoder
 
 class ReadCommandEncoder(BaseCommandEncoder):

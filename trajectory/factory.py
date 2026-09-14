@@ -1,6 +1,10 @@
+# trajectory/factory.py
+"""
+軌跡提供者工廠模組
+提供動態註冊與實例化軌跡提供者的功能。
+"""
 from typing import Any, Dict, List, Type
 from trajectory.base import BaseTrajectoryProvider, ParamSchema
-
 
 class ProviderFactory:
     """軌跡提供者註冊表與動態工廠。"""

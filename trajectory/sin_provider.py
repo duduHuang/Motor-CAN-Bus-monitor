@@ -1,7 +1,11 @@
+# trajectory/sin_provider.py
+"""
+SineTrajectoryProvider 模組
+提供正弦波軌跡生成器，支援無限持續循環、實體安全初始化與前饋平滑淡入。
+"""
 import math
 from typing import List
 from trajectory.base import BaseTrajectoryProvider, ParamSchema, TrajectoryPoint
-
 
 class SineTrajectoryProvider(BaseTrajectoryProvider):
     """正弦波軌跡產生器 (支援無限持續循環、實體安全初始化與前饋平滑淡入)。"""

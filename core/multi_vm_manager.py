@@ -1,3 +1,4 @@
+#core/multi_vm_manager.py
 """
 MultiMotorViewModelManager Module
 管理多個 MotorControlViewModel 實例，實作全域聯鎖急停 (Cascade E-STOP) 與 Master 統一指令。

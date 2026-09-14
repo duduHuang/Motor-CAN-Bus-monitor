@@ -1,3 +1,8 @@
+# trajectory/db_provider.py
+"""
+Db3TrajectoryProvider 模組
+提供 ROS 2 Rosbag2 (.db3) 關節軌跡的 Provider
+"""
 import os
 from pathlib import Path
 from typing import Any, List

@@ -1,3 +1,8 @@
+# protocol/decoders/query_decoder.py
+"""
+QueryDecoder Module
+解碼器模組，負責解析單軸查詢指令的回應封包，並將其轉換為對應的資料結構 (Telemetry)。
+"""
 from dataclasses import dataclass
 from typing import Union
 from .base_decoder import BaseDecoder

@@ -1,3 +1,4 @@
+# trajectory/manual_provider.py
 """
 Manual Trajectory Provider Module
 提供即時手動調參機制，允許 UI 在控制過程中動態修改目標指令，以進行手動響應測試。
@@ -8,7 +9,6 @@ from typing import Any, List
 
 from trajectory.base import BaseTrajectoryProvider, ParamSchema, TrajectoryPoint
 from trajectory.factory import ProviderFactory
-
 
 class ManualProvider(BaseTrajectoryProvider):
     """

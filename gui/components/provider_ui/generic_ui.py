@@ -1,3 +1,8 @@
+# gui/components/provider_ui/generic_ui.py
++"""
++GenericProviderUI Module
++通用渲染器：適用於 CSV, Sine, DB3 等參數型 Provider，提供統一的建構與參數變更回調介面。
++"""
 import dearpygui.dearpygui as dpg
 from .base_ui import BaseProviderUI
 

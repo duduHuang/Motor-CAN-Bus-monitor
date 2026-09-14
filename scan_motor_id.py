@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 CAN Bus 馬達 ID 自動掃描工具
 輪詢 ID 1 ~ 63 下發狀態查詢指令，確認匯流排上在線的馬達 ID 清單。
