@@ -1,7 +1,7 @@
 # gui/components/provider_ui/__init__.py
-+"""
-+Provider UI Components for Motor CAN Bus Monitor
-+"""
+"""
+Provider UI Components for Motor CAN Bus Monitor
+"""
 from .base_ui import BaseProviderUI
 from .generic_ui import GenericProviderUI
 from .button_ui import ButtonProviderUI

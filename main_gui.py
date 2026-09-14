@@ -24,13 +24,13 @@ def parse_axis_config(config_str: str) -> List[Tuple[str, int]]:
 def main():
     parser = argparse.ArgumentParser(description = "Multi-Axis Motor Control Validation GUI")
     parser.add_argument("--mock", action = "store_true", help = "啟用虛擬多軸 Mock 模式 (免硬體)")
-    parser.add_argument("--config", type = str, default = "canfd0:1,canfd0:2", help = "多軸配置格式: 'can0:1,can0:2,can1:1'")
+    parser.add_argument("--config", type = str, default = "canfd0:1,canfd0:2,canfd1:1,canfd1:2", help = "多軸配置格式: 'can0:1,can0:2,can1:1'")
     parser.add_argument("--bitrate", type = int, default = 1000000, help = "CAN Baudrate")
     args = parser.parse_args()
 
     axis_list = parse_axis_config(args.config)
     if not axis_list:
-        print("[ERROR] 無法解析多軸配置，請使用例如: '--config canfd0:1,canfd0:2'")
+        print("[ERROR] 無法解析多軸配置，請使用例如: '--config canfd0:1,canfd0:2,canfd1:1,canfd1:2'")
         sys.exit(1)
 
     manager = MultiMotorViewModelManager()

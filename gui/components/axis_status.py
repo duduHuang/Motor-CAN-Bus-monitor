@@ -1,8 +1,8 @@
 # gui/components/axis_status.py
-+"""
-+AxisStatsView Module
-+單軸狀態列與統計指標 View 元件，顯示系統狀態、錯誤訊息、傳輸統計與實際頻率，提供外部 (如 AxisPanelView) 主動寫入自訂錯誤與提醒訊息的介面。
-+"""
+"""
+AxisStatsView Module
+單軸狀態列與統計指標 View 元件，顯示系統狀態、錯誤訊息、傳輸統計與實際頻率，提供外部 (如 AxisPanelView) 主動寫入自訂錯誤與提醒訊息的介面。
+"""
 import dearpygui.dearpygui as dpg
 from core import SystemStatus, ControlSnapshot
 

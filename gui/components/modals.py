@@ -1,8 +1,8 @@
 # gui/components/modals.py
-+"""
-+Modals Module
-+定義全域急停 (Cascade E-STOP) 與單軸品質報告 (Quality Report) 的彈窗元件，提供外部 (如 AxisPanelView) 主動觸發顯示的介面。
-+"""
+"""
+Modals Module
+定義全域急停 (Cascade E-STOP) 與單軸品質報告 (Quality Report) 的彈窗元件，提供外部 (如 AxisPanelView) 主動觸發顯示的介面。
+"""
 import dearpygui.dearpygui as dpg
 from gui.utils import center_modal
 

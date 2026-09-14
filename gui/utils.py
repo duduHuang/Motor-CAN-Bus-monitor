@@ -1,7 +1,7 @@
 # gui/utils.py
-+"""
-+Utility functions for Motor CAN Bus Monitor GUI
-+"""
+"""
+Utility functions for Motor CAN Bus Monitor GUI
+"""
 import subprocess
 import re
 import glob
