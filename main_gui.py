@@ -11,8 +11,17 @@ from core import MotorControlViewModel, MotorController, MotorRxWorker, MultiMot
 from test.mock_can_engine import MockMotorCANEngine, MockMotorController, MockMotorRxWorker
 from gui import MotorControlView
 
+# ==========================================
+# 各關節馬達預設剛度與阻尼配置 (HipX: 1, HipY: 2, Knee: 3)
+# ==========================================
+MOTOR_GAINS_CONFIG = {
+    1: {"kp": 35.0, "kd": 1.8},  # Motor ID 1: HipX
+    2: {"kp": 42.0, "kd": 2.2},  # Motor ID 2: HipY
+    3: {"kp": 50.0, "kd": 2.6},  # Motor ID 3: Knee
+}
+
 def parse_axis_config(config_str: str) -> List[Tuple[str, int]]:
-    """解析多軸命令行配置，例如 'canfd0:1,canfd0:2' -> [('canfd0', 1), ('canfd0', 2)]"""
+    """解析多軸命令行配置，例如 'can1:1,can1:2' -> [('can1', 1), ('can1', 2)]"""
     axes = []
     items = config_str.split(",")
     for item in items:
@@ -24,13 +33,19 @@ def parse_axis_config(config_str: str) -> List[Tuple[str, int]]:
 def main():
     parser = argparse.ArgumentParser(description = "Multi-Axis Motor Control Validation GUI")
     parser.add_argument("--mock", action = "store_true", help = "啟用虛擬多軸 Mock 模式 (免硬體)")
-    parser.add_argument("--config", type = str, default = "canfd0:1,canfd0:2,canfd1:1,canfd1:2", help = "多軸配置格式: 'can0:1,can0:2,can1:1'")
+    parser.add_argument(
+        "--config",
+        type = str,
+        default = "can1:1,can2:1,can3:1,can4:1",
+        # default = "can1:1,can1:2,can1:3,can2:1,can2:2,can2:3,can3:1,can3:2,can3:3,can4:1,can4:2,can4:3,",
+        help = "多軸配置格式: 'can1:1,can1:2,can2:1'"
+        )
     parser.add_argument("--bitrate", type = int, default = 1000000, help = "CAN Baudrate")
     args = parser.parse_args()
 
     axis_list = parse_axis_config(args.config)
     if not axis_list:
-        print("[ERROR] 無法解析多軸配置，請使用例如: '--config canfd0:1,canfd0:2,canfd1:1,canfd1:2'")
+        print("[ERROR] 無法解析多軸配置，請使用例如: '--config can0:1,can0:2,can1:1,can1:2'")
         sys.exit(1)
 
     manager = MultiMotorViewModelManager()
@@ -68,6 +83,10 @@ def main():
 
             vm = MotorControlViewModel(controller = controller, rx_worker = rx_worker)
 
+        # 僅注入該軸的預設剛度與阻尼
+        gains = MOTOR_GAINS_CONFIG.get(m_id, {"kp": 20.0, "kd": 1.0})
+        vm.default_kp = gains["kp"]
+        vm.default_kd = gains["kd"]
         manager.add_motor(key = vm_key, vm = vm, channel = ch, motor_id = m_id)
 
     # 啟動主 GUI

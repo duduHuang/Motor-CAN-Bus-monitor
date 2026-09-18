@@ -256,7 +256,7 @@ def print_ui(vms: List[MotorControlViewModel], channel: str, gravity_ff: bool):
 def main():
     parser = argparse.ArgumentParser(description="MVVM Multi-Axis Hardware Tuning Script with POST")
     parser.add_argument("--axes", type=int, default=2, choices=[1, 2, 3], help="Active axes count (1~3)")
-    parser.add_argument("--can", type=str, default="canfd0", help="SocketCAN channel (e.g. can0/canfd0)")
+    parser.add_argument("--can", type=str, default="can1", help="SocketCAN channel (e.g. can0/canfd0)")
     args = parser.parse_args()
 
     # 1. 初始化 SocketCAN 網卡

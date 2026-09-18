@@ -2,8 +2,8 @@
 """
 AxisPanelView Module
 單軸左側控制與設定面板 View 元件，提供：
-- Motor ID 設定
-- Provider 選擇與參數設定
+- Motor ID 設定 (防呆與運行時鎖定)
+- Provider 選擇與預設剛度/阻尼配置帶入
 - 波形圖設定（自動捲動、視窗大小）
 - CSV 匯出、報告生成、波形圖存檔
 - 啟動/停止控制與緊急停止按鈕
@@ -38,8 +38,14 @@ class AxisPanelView:
 
         self.current_params: Dict[str, Any] = {}
         self.active_provider_ui = None  # 保存當前 ProviderUI 實例
+        
+        # UI 狀態與防死鎖標記
+        self._is_updating_id = False
+        self._last_is_idle = None
+
         self.tags = {
             "main_win": dpg.generate_uuid(),
+            "motor_id_input": dpg.generate_uuid(),
             "provider_combo": dpg.generate_uuid(),
             "params_group": dpg.generate_uuid(),
             "auto_scroll": dpg.generate_uuid(),
@@ -47,15 +53,27 @@ class AxisPanelView:
         }
 
     def _get_or_init_default_provider_name(self) -> str:
+        """初始化 Provider 並帶入對應馬達的剛度 (Kp) 與阻尼 (Kd)"""
+        default_target = "Button"
         curr_provider = self.vm.get_current_provider()
+        
         if curr_provider is None:
             available = self.vm.get_available_providers()
-            default_p = "Manual" if "Manual" in available else (available[0] if available else "Manual")
-            self.vm.select_provider(default_p)
+            default_p = default_target if default_target in available else (available[0] if available else "Manual")
+            # 1. 初始化時寫入對應關節的預設剛度與阻尼
+            self.vm.select_provider(
+                default_p, 
+                kp=getattr(self.vm, "default_kp", 20.0), 
+                kd=getattr(self.vm, "default_kd", 1.0)
+            )
             curr_provider = self.vm.get_current_provider()
         
         if curr_provider:
+            for reg_name, p_cls in ProviderFactory._registry.items():
+                if isinstance(curr_provider, p_cls):
+                    return reg_name
             return curr_provider.__class__.__name__.replace("Provider", "")
+
         return "Manual"
 
     def build(self):
@@ -65,10 +83,15 @@ class AxisPanelView:
             dpg.add_text("Control & Settings", color=(100, 200, 255))
             dpg.add_separator()
 
+            # 2. 安全控管 Motor ID 輸入框：限制最小值為 1，並只在按下 Enter 或離開焦點時處置
             dpg.add_input_int(
                 label="Motor ID",
                 default_value=getattr(self.vm, "motor_id", 1),
-                callback=lambda s, a: setattr(self.vm, 'motor_id', a)
+                tag=self.tags["motor_id_input"],
+                on_enter=True,
+                min_value=1,
+                min_clamped=True,
+                callback=self._on_motor_id_changed
             )
 
             dpg.add_combo(
@@ -131,6 +154,40 @@ class AxisPanelView:
         if self.active_provider_ui:
             self.active_provider_ui.update(snap)
 
+        # 動態管制 Motor ID 輸入框：僅在狀態變更時重新設定 UI 可否編輯
+        if dpg.does_item_exist(self.tags["motor_id_input"]):
+            status_val = snap.status.name if hasattr(snap.status, "name") else str(snap.status)
+            is_idle = status_val in ("IDLE", "E_STOPPED")
+            if self._last_is_idle != is_idle:
+                self._last_is_idle = is_idle
+                dpg.configure_item(self.tags["motor_id_input"], enabled=is_idle)
+
+    def _on_motor_id_changed(self, sender, app_data):
+        """Motor ID 輸入變更時的安全控制"""
+        if self._is_updating_id:
+            return
+
+        # 1. 防呆檢查：若值非法（<= 0 或 None），彈回目前 VM 的合法 ID
+        if type(app_data) is not int or app_data <= 0:
+            self._is_updating_id = True
+            if dpg.does_item_exist(self.tags["motor_id_input"]):
+                dpg.set_value(self.tags["motor_id_input"], self.vm.motor_id)
+            self._is_updating_id = False
+            return
+
+        if app_data == self.vm.motor_id:
+            return
+
+        # 2. 寫入 ViewModel Property
+        self.vm.motor_id = app_data
+        
+        # 3. 若 ViewModel 拒絕變更（如運轉中），彈回當前 ID
+        if dpg.does_item_exist(self.tags["motor_id_input"]):
+            if dpg.get_value(self.tags["motor_id_input"]) != self.vm.motor_id:
+                self._is_updating_id = True
+                dpg.set_value(self.tags["motor_id_input"], self.vm.motor_id)
+                self._is_updating_id = False
+
     def _on_provider_changed(self, sender, app_data):
         self.vm.stop_control()
         self.vm.select_provider(app_data)
@@ -145,7 +202,16 @@ class AxisPanelView:
         schema_list = ProviderFactory.get_provider_schema(provider_name) or []
         self.current_params.clear()
 
-        # 2. 透過 Factory 實例化專屬 UI 渲染器並保存至 self.active_provider_ui
+        # 2. 注入該馬達的預設剛度與阻尼
+        for schema in schema_list:
+            if schema.name == "kp":
+                self.current_params["kp"] = getattr(self.vm, "default_kp", schema.default_value)
+            elif schema.name == "kd":
+                self.current_params["kd"] = getattr(self.vm, "default_kd", schema.default_value)
+            else:
+                self.current_params[schema.name] = schema.default_value
+
+        # 3. 透過 Factory 實例化專屬 UI 渲染器並保存至 self.active_provider_ui
         self.active_provider_ui = ProviderUIFactory.create_ui(
             provider_name=provider_name,
             parent_tag=self.tags["params_group"],
@@ -158,10 +224,8 @@ class AxisPanelView:
             vm=self.vm
         )
 
-        # 3. 執行繪製
+        # 4. 執行繪製與初始化路徑驗證
         self.active_provider_ui.build()
-
-        # 4. 初始化路徑驗證
         self._validate_file_paths(is_starting=False)
 
     def _on_param_changed_from_ui(self, param_name: str, value: Any):
@@ -175,17 +239,18 @@ class AxisPanelView:
             self.open_file_dialog_cb(self.key, param_name, file_filter, input_tag)
 
     def _validate_file_paths(self, is_starting: bool = False) -> bool:
-        """
-        驗證目前 Provider 是否有選定必填檔案。
-        - 若 is_starting=False，僅驗證路徑是否存在，避免無故清空其他 UI 錯誤警示。
-        - 若 is_starting=True，缺檔時會將錯誤拋至 UI 阻止啟動。
-        """
+        """驗證目前 Provider 是否有選定必填檔案。"""
         provider_name = dpg.get_value(self.tags["provider_combo"]) if dpg.does_item_exist(self.tags["provider_combo"]) else None
         if not provider_name:
             curr_provider = self.vm.get_current_provider()
             if not curr_provider:
                 return True
-            provider_name = curr_provider.__class__.__name__.replace("Provider", "")
+            for reg_name, p_cls in ProviderFactory._registry.items():
+                if isinstance(curr_provider, p_cls):
+                    provider_name = reg_name
+                    break
+            if not provider_name:
+                provider_name = curr_provider.__class__.__name__.replace("Provider", "")
 
         schemas = ProviderFactory.get_provider_schema(provider_name) or []
 
@@ -202,7 +267,6 @@ class AxisPanelView:
                     self.set_error_msg_cb(f"File Not Found: {filepath}")
                     return False
 
-        # 通過驗證時，僅在點擊 START 時清除先前的檔案錯誤訊息
         if is_starting:
             self.set_error_msg_cb("")
         return True

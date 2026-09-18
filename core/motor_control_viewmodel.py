@@ -82,7 +82,7 @@ class MotorControlViewModel:
         self._history_lock = threading.Lock()
 
         # --- 控制與安全參數 ---
-        self.motor_id: int = 1
+        self._motor_id: int = 1
         self.control_freq_hz: float = 100.0  # 控制頻率 (100Hz -> 10ms)
         self.target_duration: float = 10.0   # 自動停止時間 (秒)
         self.default_kp: float = 10.0
@@ -147,6 +147,35 @@ class MotorControlViewModel:
                 pass
         if self._current_provider:
             self._current_provider.handle_input(action, **kwargs)
+
+    def clear_history(self) -> None:
+        """Thread-Safe 清空舊馬達的歷史波形與遙測快照"""
+        with self._history_lock:
+            self._history_buffer.clear()
+        with self._telemetry_lock:
+            self._telemetry = TelemetryData(last_update_time=time.monotonic())
+        with self._snapshot_lock:
+            self._snapshot = ControlSnapshot(status=self._status)
+
+    @property
+    def motor_id(self) -> int:
+        return self._motor_id
+
+    @motor_id.setter
+    def motor_id(self, new_id: int) -> None:
+        # 嚴格限制：必須是純整數 (排除 bool) 且必須大於 0
+        if type(new_id) is not int or new_id <= 0:
+            return
+
+        with self._status_lock:
+            if self._status in [SystemStatus.RUNNING, SystemStatus.PROBING]:
+                self._notify_status_change("[警告] 控制運行中，禁止變更 Motor ID!")
+                return
+
+        if self._motor_id != new_id:
+            self._motor_id = new_id
+            self.clear_history()
+            self._notify_status_change(f"Motor ID 已變更為 {new_id}，請重新按下 START 對齊探測")
 
     # ------------------------------------------------------------------
     # 生命週期與控制介面
