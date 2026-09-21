@@ -1,4 +1,3 @@
-# run_safe_12motor_stand.py
 import time
 import math
 import can
@@ -8,9 +7,13 @@ from trajectory.stand_hold_provider import StandHoldTrajectoryProvider
 
 CAN_CHANNELS = ["can1", "can2", "can3", "can4"]
 
-# ===== 時間控制參數配置 =====
-RAMP_TIME_SEC = 5.0    # 姿態平滑過渡時間 (秒)
-HOLD_TIME_SEC = 5.0    # 站立到達後保持鎖定觀察的秒數 (設 0 則到達立即停止)
+# ===== 時間與力矩控制參數配置 =====
+T_CROUCH = 0.8         # 0 -> Crouch 時間 (0.8s)
+T_STAND = 1.5          # Crouch -> Stand 時間 (1.5s)
+TAU_MAX = 3.0          # 膝關節最大前饋力矩 (Nm)，初始設為 3.0 Nm 保證安全
+
+RAMP_TIME_SEC = T_CROUCH + T_STAND
+HOLD_TIME_SEC = 5.0    # 站立到達後保持鎖定觀察的秒數
 TOTAL_DURATION = RAMP_TIME_SEC + HOLD_TIME_SEC
 
 def query_real_angles(buses, controllers, workers) -> dict:
@@ -44,7 +47,7 @@ def query_real_angles(buses, controllers, workers) -> dict:
 
 def main():
     print("==================================================")
-    print("  12 軸全車安全站立測試 (自動計時終止版)")
+    print("  12 軸全車安全站立測試 (動態 dt / 動態前饋升級版)")
     print("==================================================")
 
     manager = MultiMotorViewModelManager()
@@ -70,16 +73,21 @@ def main():
             vm = MotorControlViewModel(controller=ctrl, rx_worker=worker)
             vm.motor_id = m_id
             
-            vm.max_speed_rads = 5.0     # 限制最大速度 (rad/s)
-            vm.max_torque_nm = 10.0     # 限制最大扭矩 (Nm)
-            vm.max_pos_error = 0.8      # 限制跟隨誤差 (rad)
+            # 放寬落地抗重力保護上限
+            vm.max_speed_rads = 8.0     # 速度上限放寬至 8 rad/s
+            vm.max_torque_nm = 18.0     # 扭矩上限放寬至 18 Nm
+            vm.max_pos_error = 1.2      # 跟隨誤差限制放寬至 1.2 rad (~68°)
 
+            # 正確注入 t_crouch, t_stand, tau_max 參數
             provider = StandHoldTrajectoryProvider(
                 channel=ch, 
                 motor_id=m_id, 
-                up_ramp_sec=RAMP_TIME_SEC, 
-                kp=20.0,
-                kd=1.5
+                t_crouch=T_CROUCH,
+                t_stand=T_STAND,
+                kp_soft=20.0,
+                kp_hard=55.0,
+                kd=2.5,
+                tau_max=TAU_MAX
             )
             vm._current_provider = provider
             manager.add_motor(key=vm_key, vm=vm, channel=ch, motor_id=m_id)
@@ -110,7 +118,7 @@ def main():
         return
 
     # STEP 3: 啟動控制與自動計時終止
-    input(f"\n【請確認機器人已懸空架起】按 Enter 啟動站立 (將於 {TOTAL_DURATION:.1f} 秒後自動停止)...")
+    input(f"\n【請確認機器人放至地面趴姿或懸空】按 Enter 啟動階段二起立 (將於 {TOTAL_DURATION:.1f} 秒後自動停止)...")
     manager.start_all()
 
     try:
@@ -127,7 +135,6 @@ def main():
             
             print(f"\r[T:{elapsed:4.1f}s/{TOTAL_DURATION:.1f}s] " + " | ".join(m_info), end="", flush=True)
             
-            # 【自動計時終止】當執行時間到達目標總時間時自動跳出
             if elapsed >= TOTAL_DURATION:
                 print(f"\n\n[自動完成] 已到達指定運轉時間 {TOTAL_DURATION:.1f} 秒，自動結束測試！")
                 break

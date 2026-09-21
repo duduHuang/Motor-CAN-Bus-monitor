@@ -88,12 +88,17 @@ class MotorControlViewModel:
         self.default_kp: float = 10.0
         self.default_kd: float = 1.0
 
-        # 安全保護閾值
-        self.max_speed_rads: float = 8.0      # rad/s
-        self.max_torque_nm: float = 5.0       # Nm
-        self.max_pos_error: float = 0.8       # rad
-        self.telemetry_timeout_s: float = 0.3  # 秒
-        self.control_start_delay: float = 0.2  # 秒
+        # 安全保護閾值與 Debounce 去雜訊設定
+        self.max_speed_rads: float = 8.0          # rad/s
+        self.max_torque_nm: float = 5.0           # Nm
+        self.max_pos_error: float = 0.8           # rad
+        self.telemetry_timeout_s: float = 0.3      # 秒
+        self.control_start_delay: float = 0.2      # 秒
+
+        # === [新增] Debounce 與離群值去雜訊機制 ===
+        self._overspeed_counter: int = 0          # 連續過速幀數計數器
+        self.overspeed_debounce_threshold: int = 3 # 連續 3 幀過速才判定為真實暴衝
+        self.outlier_speed_threshold: float = 30.0  # 離群值極限 (>30 rad/s 視為 CAN 電磁波 Spike 雜訊)
 
         # --- Provider 管理 ---
         self._current_provider: Optional[BaseTrajectoryProvider] = None
@@ -196,6 +201,7 @@ class MotorControlViewModel:
             self._stop_event.clear()
             self._estop_event.clear()
             self._estop_executed = False
+            self._overspeed_counter = 0  # [新增] 啟動前清空 Debounce 計數器
 
             with self._history_lock:
                 self._history_buffer.clear()
@@ -501,14 +507,26 @@ class MotorControlViewModel:
         return None
 
     def _validate_safety(self, rx: TelemetryData, now: float, elapsed_time: float, p_des: float) -> bool:
-        """安全指標閥值檢查"""
+        """安全指標閥值檢查 (含離群值剔除與 Debounce 抗雜訊機制)"""
         if (now - rx.last_update_time) > self.telemetry_timeout_s:
             self.trigger_estop(f"Communication Timeout (> {self.telemetry_timeout_s}s)")
             return False
 
-        if abs(rx.v_act) > self.max_speed_rads:
-            self.trigger_estop(f"[Overspeed Protection] {rx.v_act:.2f} rad/s > {self.max_speed_rads}")
-            return False
+        # === [優化] 過速保護 (含離群值剔除與 Debounce 去雜訊) ===
+        v_act_abs = abs(rx.v_act)
+        
+        if v_act_abs > self.outlier_speed_threshold:
+            # 離群值過濾：物理上不可能發生的極端角速度 (例如 -45 rad/s CAN 雜訊 Spike)，直接忽略不予計數
+            pass
+        elif v_act_abs > self.max_speed_rads:
+            # 超過正常極限，連續計數
+            self._overspeed_counter += 1
+            if self._overspeed_counter >= self.overspeed_debounce_threshold:
+                self.trigger_estop(f"[Overspeed Protection] {rx.v_act:.2f} rad/s > {self.max_speed_rads}")
+                return False
+        else:
+            # 數據恢復正常，即時歸零
+            self._overspeed_counter = 0
 
         if abs(rx.torque_act) > self.max_torque_nm:
             self.trigger_estop(f"[Overload Protection] {rx.torque_act:.2f} Nm > {self.max_torque_nm}")
