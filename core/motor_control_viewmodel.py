@@ -97,8 +97,11 @@ class MotorControlViewModel:
 
         # === [新增] Debounce 與離群值去雜訊機制 ===
         self._overspeed_counter: int = 0          # 連續過速幀數計數器
-        self.overspeed_debounce_threshold: int = 3 # 連續 3 幀過速才判定為真實暴衝
+        self._pos_error_counter: int = 0      # [新增] 位置誤差連續計數器
+        self._overload_counter: int = 0       # [新增] 扭矩過載連續計數器
+        self.debounce_threshold: int = 3 # 連續 3 幀過速才判定為真實暴衝
         self.outlier_speed_threshold: float = 30.0  # 離群值極限 (>30 rad/s 視為 CAN 電磁波 Spike 雜訊)
+        self.outlier_pos_error_threshold: float = 3.0 # [新增] 位置誤差離群極限 (>3.0 rad 視為 CAN Spike)
 
         # --- Provider 管理 ---
         self._current_provider: Optional[BaseTrajectoryProvider] = None
@@ -187,6 +190,9 @@ class MotorControlViewModel:
     # ------------------------------------------------------------------
     def start_control(self) -> bool:
         """啟動背景控制執行緒"""
+        self._overspeed_counter = 0
+        self._pos_error_counter = 0
+        self._overload_counter = 0
         with self._status_lock:
             if self._status in [SystemStatus.RUNNING, SystemStatus.PROBING]:
                 return False
@@ -507,36 +513,47 @@ class MotorControlViewModel:
         return None
 
     def _validate_safety(self, rx: TelemetryData, now: float, elapsed_time: float, p_des: float) -> bool:
-        """安全指標閥值檢查 (含離群值剔除與 Debounce 抗雜訊機制)"""
+        """安全指標閥值檢查 (含 CAN 電磁雜訊離群值剔除與多重 Debounce 機制)"""
+        # 1. 通訊超時檢查
         if (now - rx.last_update_time) > self.telemetry_timeout_s:
             self.trigger_estop(f"Communication Timeout (> {self.telemetry_timeout_s}s)")
             return False
 
-        # === [優化] 過速保護 (含離群值剔除與 Debounce 去雜訊) ===
+        # 2. 過速保護 (含離群過濾與 Debounce)
         v_act_abs = abs(rx.v_act)
-        
         if v_act_abs > self.outlier_speed_threshold:
-            # 離群值過濾：物理上不可能發生的極端角速度 (例如 -45 rad/s CAN 雜訊 Spike)，直接忽略不予計數
-            pass
+            pass  # 極端電磁 Spike 離群值，直接忽略
         elif v_act_abs > self.max_speed_rads:
-            # 超過正常極限，連續計數
             self._overspeed_counter += 1
-            if self._overspeed_counter >= self.overspeed_debounce_threshold:
+            if self._overspeed_counter >= self.debounce_threshold:
                 self.trigger_estop(f"[Overspeed Protection] {rx.v_act:.2f} rad/s > {self.max_speed_rads}")
                 return False
         else:
-            # 數據恢復正常，即時歸零
             self._overspeed_counter = 0
 
+        # 3. 過載扭矩保護 (含 Debounce)
         if abs(rx.torque_act) > self.max_torque_nm:
-            self.trigger_estop(f"[Overload Protection] {rx.torque_act:.2f} Nm > {self.max_torque_nm}")
-            return False
+            self._overload_counter += 1
+            if self._overload_counter >= self.debounce_threshold:
+                self.trigger_estop(f"[Overload Protection] {rx.torque_act:.2f} Nm > {self.max_torque_nm}")
+                return False
+        else:
+            self._overload_counter = 0
 
+        # 4. 跟隨誤差保護 (含離群過濾與 Debounce)
         if elapsed_time > self.control_start_delay:
             pos_err = abs(p_des - rx.p_act)
-            if pos_err > self.max_pos_error:
-                self.trigger_estop(f"[Position Error Protection] Following Error {pos_err:.3f} rad > {self.max_pos_error}")
-                return False
+            
+            if pos_err > self.outlier_pos_error_threshold:
+                # 離群過濾：10ms 內不可能發生 > 3.0 rad (~172°) 的位移跳變 (例如 10.129 rad)，判定為 CAN 雜訊 Spike，不計數直接丟棄
+                pass
+            elif pos_err > self.max_pos_error:
+                self._pos_error_counter += 1
+                if self._pos_error_counter >= self.debounce_threshold:
+                    self.trigger_estop(f"[Position Error Protection] Following Error {pos_err:.3f} rad > {self.max_pos_error}")
+                    return False
+            else:
+                self._pos_error_counter = 0
 
         return True
 

@@ -3,18 +3,17 @@ import math
 import can
 from core import MotorController, MotorControlViewModel, MotorRxWorker, MultiMotorViewModelManager
 from protocol import MotorProtocol
-from trajectory.stand_hold_provider import StandHoldTrajectoryProvider
+from trajectory.gait_provider import QuadrupedGaitProvider
 
 CAN_CHANNELS = ["can1", "can2", "can3", "can4"]
 
-# ===== 5 階段時間與力矩參數配置 =====
-T_CROUCH = 0.8         # Prone <-> Crouch (0.8s)
-T_STAND = 1.5          # Crouch <-> Stand (1.5s)
-T_HOLD = 5.0           # 站立頂點保持時間 (5.0s)
-TAU_MAX = 3.0          # 膝關節前饋力矩上限 (Nm)
-
-# 總運算時間：0.8 + 1.5 + 5.0 + 1.5 + 0.8 = 9.6 秒
-TOTAL_DURATION = (T_CROUCH * 2) + (T_STAND * 2) + T_HOLD
+# ===== 步態測試參數配置 =====
+GAIT_FREQ_HZ = 1.2         # 踏步頻率 (Hz)，建議初次測試設 1.0 ~ 1.2 Hz
+STEP_HEIGHT_DEG = 15.0     # 抬腳幅度 (°)，初次測試建議 15.0° (小幅踏步較安全)
+KP_STAND = 55.0            # 支撐剛度 (Kp)
+KD = 2.5                   # 阻尼 (Kd)
+TAU_MAX = 3.0              # 膝關節前饋力矩上限 (Nm)
+TEST_DURATION = 10.0       # 自動測試運轉時間 (秒)
 
 def query_real_angles(buses, controllers, workers) -> dict:
     """開機前主動發送 0x9C 讀取指令，抓取 12 軸真實實體角度 (°)"""
@@ -45,27 +44,15 @@ def query_real_angles(buses, controllers, workers) -> dict:
 
     return angles_deg
 
-def get_phase_name(t: float) -> str:
-    """即時判斷當前運動階段，方便視覺化觀察"""
-    t1 = T_CROUCH
-    t2 = t1 + T_STAND
-    t3 = t2 + T_HOLD
-    t4 = t3 + T_STAND
-    if t < t1: return "1. Prone->Crouch "
-    elif t < t2: return "2. Crouch->Stand"
-    elif t < t3: return "3. STAND HOLD   "
-    elif t < t4: return "4. Stand->Crouch"
-    else: return "5. Crouch->Prone "
-
 def main():
     print("==================================================")
-    print("  12 軸全車站立與安全降落測試 (Prone->Stand->Prone)")
+    print("  12 軸對角步態 (Trot Gait) 動態踏步測試")
     print("==================================================")
 
     manager = MultiMotorViewModelManager()
     buses, controllers, workers = {}, {}, {}
 
-    # STEP 1: 初始化 4 個 CAN Bus
+    # STEP 1: 初始化 4 個 CAN Bus 並注入 QuadrupedGaitProvider
     for ch in CAN_CHANNELS:
         try:
             bus = can.ThreadSafeBus(channel=ch, interface='socketcan')
@@ -85,25 +72,25 @@ def main():
             vm = MotorControlViewModel(controller=ctrl, rx_worker=worker)
             vm.motor_id = m_id
             
-            vm.max_speed_rads = 8.0     # 速度上限放寬至 8 rad/s
-            vm.max_torque_nm = 18.0     # 扭矩上限放寬至 18 Nm
-            vm.max_pos_error = 1.2      # 跟隨誤差限制放寬至 1.2 rad
+            # 放寬動態運動下的保護上限
+            vm.max_speed_rads = 8.0     # 速度上限 8 rad/s
+            vm.max_torque_nm = 18.0     # 扭矩上限 18 Nm
+            vm.max_pos_error = 1.2      # 跟隨誤差限制 1.2 rad
 
-            provider = StandHoldTrajectoryProvider(
+            # 實例化 GaitProvider
+            provider = QuadrupedGaitProvider(
                 channel=ch, 
                 motor_id=m_id, 
-                t_crouch=T_CROUCH,
-                t_stand=T_STAND,
-                t_hold=T_HOLD,
-                kp_soft=20.0,
-                kp_hard=55.0,
-                kd=2.5,
+                freq_hz=GAIT_FREQ_HZ,
+                step_height_deg=STEP_HEIGHT_DEG,
+                kp_stand=KP_STAND,
+                kd=KD,
                 tau_max=TAU_MAX
             )
             vm._current_provider = provider
             manager.add_motor(key=vm_key, vm=vm, channel=ch, motor_id=m_id)
 
-    # STEP 2: 核心主動角度診斷
+    # STEP 2: 開機實體角度安全診斷
     real_angles = query_real_angles(buses, controllers, workers)
     
     print("\n" + "=" * 65)
@@ -128,33 +115,34 @@ def main():
         for b in buses.values(): b.shutdown()
         return
 
-    # STEP 3: 啟動控制與自動計時終止
-    input(f"\n【請確認機器人周遭無障礙】按 Enter 啟動完整起伏測試 (全程共 {TOTAL_DURATION:.1f} 秒)...")
+    # STEP 3: 啟動踏步控制
+    print(f"\n【安全提示】首次測試強烈建議將機器狗【架空懸掛】測試！")
+    input(f"按 Enter 啟動 {TEST_DURATION:.1f} 秒對角踏步測試 (可隨時按 Ctrl+C 緊急停止)...")
     manager.start_all()
 
     try:
         start_t = time.time()
         while True:
             elapsed = time.time() - start_t
-            phase_str = get_phase_name(elapsed)
             
+            # 抓取 4 條腿膝關節 (ID3) 的即時角度與力矩
             m_info = []
             for ch in CAN_CHANNELS:
                 vm = manager.get_vm(f"{ch}_ID3")
                 if vm:
                     s = vm.get_ui_snapshot()
-                    m_info.append(f"{ch}_M3({s.position_deg:5.1f}°, {s.torque_act:4.1f}N)")
+                    m_info.append(f"{ch}_Knee({s.position_deg:5.1f}°, {s.torque_act:4.1f}N)")
             
-            print(f"\r[{phase_str}] [T:{elapsed:4.1f}s/{TOTAL_DURATION:.1f}s] " + " | ".join(m_info), end="", flush=True)
+            print(f"\r[Gait Test] [T:{elapsed:4.1f}s/{TEST_DURATION:.1f}s] " + " | ".join(m_info), end="", flush=True)
             
-            if elapsed >= TOTAL_DURATION:
-                print(f"\n\n[自動完成] 已完成 趴->站(5s)->趴 完整測試，安全關閉！")
+            if elapsed >= TEST_DURATION:
+                print(f"\n\n[自動完成] 已完成 {TEST_DURATION:.1f} 秒踏步測試，安全停止！")
                 break
 
-            time.sleep(0.1)
+            time.sleep(0.05)
 
     except KeyboardInterrupt:
-        print("\n\n[USER INTERRUPT] 使用者按下 Ctrl+C，手動停止！")
+        print("\n\n[USER INTERRUPT] 使用者按下 Ctrl+C，手動停止所有馬達！")
     finally:
         manager.stop_all()
         for w in workers.values(): w.stop()
