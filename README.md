@@ -43,7 +43,7 @@
 1. **高頻 CAN Logging 效能優化**：控制迴圈改儲存 Raw Data，改為 GUI 讀取時才進行「延遲格式化 (Lazy Formatting)」，消除高頻字串處理帶來的 CPU 負擔。
 2. **ViewModel 封裝性提升**：消除 View 直接對 ViewModel 私有成員（`_current_provider`）的存取，規範統一注入介面。
 3. **校正參數解耦**：將硬編碼之 `MOTOR_CALIBRATION_DEG` 抽離至外置 Config 檔案，提升硬體維護彈性。
-4. **控制迴圈時間補償**：採用 `time.monotonic()` 自適應休眠補償，顯著降低高頻控制時的時間抖動 (Jitter)。
+4. **控制迴圈時間補償**：採用 `time.monotonic()` 自適應休眠補償，顯著降低高頻控制時的時間抖動 (Jitter)	。
 
 ---
 
@@ -77,10 +77,10 @@ pip install -r requirements.txt
 
 ### 3. 執行指令範例
 * **啟動多軸 GUI 視覺監控面板：**
-# 實體硬體模式 (指定 CAN Channel 與 馬達 ID)
+* **實體硬體模式 (指定 CAN Channel 與 馬達 ID)** 
 python main_gui.py --config "can1:1,can1:2,can1:3,can2:1" --bitrate 1000000
 
-# 免硬體模擬測試 (Mock Mode)
+* **免硬體模擬測試 (Mock Mode)**
 python main_gui.py --mock --config "can1:1,can1:2,can1:3"
 
 * **執行 12 軸姿態 FSM 控制驗證：**
