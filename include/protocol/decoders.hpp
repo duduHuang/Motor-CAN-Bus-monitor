@@ -12,13 +12,13 @@ namespace servo_robot::protocol {
 struct ErrorStatusFlags {
     uint16_t raw_value{0};
 
-    constexpr bool stall() const noexcept { return (raw_value & 0x0002) != 0; }
-    constexpr bool low_voltage() const noexcept { return (raw_value & 0x0004) != 0; }
-    constexpr bool over_voltage() const noexcept { return (raw_value & 0x0008) != 0; }
-    constexpr bool over_current() const noexcept { return (raw_value & 0x0010) != 0; }
-    constexpr bool mos_over_temp() const noexcept { return (raw_value & 0x0080) != 0; }
-    constexpr bool motor_over_temp() const noexcept { return (raw_value & 0x1000) != 0; }
-    constexpr bool encoder_calib_error() const noexcept { return (raw_value & 0x2000) != 0; }
+    [[nodiscard]] constexpr bool stall() const noexcept { return (raw_value & 0x0002) != 0; }
+    [[nodiscard]] constexpr bool low_voltage() const noexcept { return (raw_value & 0x0004) != 0; }
+    [[nodiscard]] constexpr bool over_voltage() const noexcept { return (raw_value & 0x0008) != 0; }
+    [[nodiscard]] constexpr bool over_current() const noexcept { return (raw_value & 0x0010) != 0; }
+    [[nodiscard]] constexpr bool mos_over_temp() const noexcept { return (raw_value & 0x0080) != 0; }
+    [[nodiscard]] constexpr bool motor_over_temp() const noexcept { return (raw_value & 0x1000) != 0; }
+    [[nodiscard]] constexpr bool encoder_calib_error() const noexcept { return (raw_value & 0x2000) != 0; }
 
     static constexpr ErrorStatusFlags from_uint16(uint16_t val) noexcept {
         return ErrorStatusFlags{val};
@@ -138,7 +138,7 @@ using ServoTelemetry = std::variant<
 >;
 
 /**
- * @brief 零分配/零阻塞 Telemetry 解碼器
+ * @brief 零分配/零阻塞 Telemetry 解碼器，內建「第二層協定語法與數值合法性過濾器」
  */
 class ServoDecoder {
 public:
@@ -146,7 +146,7 @@ public:
      * @brief 解碼 8-Byte Payload 為對應 Telemetry 變體
      * @note $O(1)$ 時間複雜度，noexcept 且無 dynamic allocation
      */
-    static ServoTelemetry decode_any(const std::array<uint8_t, 8>& payload) noexcept;
+    [[nodiscard]] static ServoTelemetry decode_any(const std::array<uint8_t, 8>& payload) noexcept;
 };
 
 } // namespace servo_robot::protocol
