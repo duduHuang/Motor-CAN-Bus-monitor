@@ -4,11 +4,12 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 
 namespace protocol {
 
 /**
- * @brief MIT 模式物理量界限設定檔 (預設相容 Table 1 規範)
+ * @brief MIT 模式物理量界限設定檔
  */
 struct MITConfig {
     float p_min  = -12.566f;  // rad
@@ -24,32 +25,28 @@ struct MITConfig {
 };
 
 /**
- * @brief MIT 模式下發控制參數 (TX)
+ * @brief MIT 控制指令 (TX)
  */
 struct MITCommand {
-    float p_des{0.0f};  // 期望位置 (rad)
-    float v_des{0.0f};  // 期望速度 (rad/s)
-    float kp{0.0f};     // 位置剛度
-    float kd{0.0f};     // 速度阻尼
-    float t_ff{0.0f};   // 前饋力矩 (Nm)
+    float p_des{0.0f};
+    float v_des{0.0f};
+    float kp{0.0f};
+    float kd{0.0f};
+    float t_ff{0.0f};
 };
 
 /**
- * @brief MIT 模式馬達回傳實體物理量 (RX Telemetry)
+ * @brief MIT 馬達回傳實體數據 (RX)
  */
 struct MITTelemetry {
-    uint8_t device_can_id{0}; // CAN 裝置 ID (0~255)
-    float position_rad{0.0f};  // 當前位置 (rad)
-    float velocity_rads{0.0f}; // 當前速度 (rad/s)
-    float torque_nm{0.0f};     // 當前力矩 (Nm)
+    uint8_t device_can_id{0};
+    float position_rad{0.0f};
+    float velocity_rads{0.0f};
+    float torque_nm{0.0f};
 };
 
 /**
- * @brief 核心數值映射與 Bit-Packing 轉換函式
- */
-
-/**
- * @brief 將浮點數線性映射並 Clamp 至指定 Bit 數量的無符號整數 (Compile-time 支援)
+ * @brief 核心數值映射與 Bit-Packing 轉換
  */
 [[nodiscard]] constexpr uint32_t float_to_uint(float x, float x_min, float x_max, int bits) noexcept {
     const float clamped_x = std::clamp(x, x_min, x_max);
@@ -59,9 +56,6 @@ struct MITTelemetry {
     return static_cast<uint32_t>((clamped_x - offset) * static_cast<float>(max_int) / span);
 }
 
-/**
- * @brief 將壓碼後的無符號整數還原為實體物理量浮點數 (Compile-time 支援)
- */
 [[nodiscard]] constexpr float uint_to_float(uint32_t x_int, float x_min, float x_max, int bits) noexcept {
     const float span = x_max - x_min;
     const float offset = x_min;
@@ -70,14 +64,36 @@ struct MITTelemetry {
 }
 
 /**
- * @brief MIT 模式編解碼門面 (完全靜態、無鎖、零動態記憶體分配)
+ * @brief MITProtocol 編解碼門面 (包含第二層 Protocol Syntactic Filter)
  */
 class MITProtocol {
 public:
-    MITProtocol() = delete; // 純靜態門面，禁止實例化
+    MITProtocol() = delete;
 
     /**
-     * @brief 將 MIT 控制指令按規範壓碼為 8-byte CAN Payload
+     * @brief [第二層防禦] 伺服指令回應 Echo (0x240 區段) DATA[0] 合法性檢查
+     */
+    [[nodiscard]] static constexpr bool is_valid_servo_echo(uint8_t echo_cmd) noexcept {
+        switch (echo_cmd) {
+            case 0x20: // 功能控制回應
+            case 0x9A: // 讀取 PID / 馬達狀態
+            case 0x9C: // 讀取關節編碼器物理位置
+            case 0xA1: // 轉矩閉環控制回應
+            case 0xA2: // 速度閉環控制回應
+            case 0xA4: // 位置閉環控制回應
+            case 0xA9: // 力控位置閉環回應
+            case 0xB1: // 系統控制指令回應
+            case 0xB2: // 軟體版本回應
+            case 0xB3: // 通訊中斷保護回應
+            case 0xB5: // 讀取馬達型號回應
+                return true;
+            default:
+                return false; // 非法/未定義的 Command Echo，認定為 CAN 雜訊
+        }
+    }
+
+    /**
+     * @brief TX 壓碼 (無鎖、Zero-Allocation)
      */
     [[nodiscard]] static constexpr std::array<uint8_t, 8> encode(
         const MITCommand& cmd, 
@@ -90,69 +106,63 @@ public:
         const uint32_t t_int  = float_to_uint(cmd.t_ff,  cfg.t_min,  cfg.t_max,  12);
 
         std::array<uint8_t, 8> payload{};
-
-        // Byte 0-1: p_des (16-bit)
         payload[0] = static_cast<uint8_t>((p_int >> 8) & 0xFF);
         payload[1] = static_cast<uint8_t>(p_int & 0xFF);
-
-        // Byte 2-3: v_des (12-bit) & kp [11..8] (4-bit)
         payload[2] = static_cast<uint8_t>((v_int >> 4) & 0xFF);
         payload[3] = static_cast<uint8_t>(((v_int & 0x0F) << 4) | ((kp_int >> 8) & 0x0F));
-
-        // Byte 4: kp [7..0]
         payload[4] = static_cast<uint8_t>(kp_int & 0xFF);
-
-        // Byte 5-6: kd (12-bit) & t_ff [11..8] (4-bit)
         payload[5] = static_cast<uint8_t>((kd_int >> 4) & 0xFF);
         payload[6] = static_cast<uint8_t>(((kd_int & 0x0F) << 4) | ((t_int >> 8) & 0x0F));
-
-        // Byte 7: t_ff [7..0]
         payload[7] = static_cast<uint8_t>(t_int & 0xFF);
 
         return payload;
     }
 
     /**
-     * @brief 解碼下發的 8-byte CAN Payload 還原為 MITCommand 指令物件 (TX 反向解析/監控)
+     * @brief [第二層防禦] RX Telemetry 解碼與完整語法/數值過濾器
      */
-    [[nodiscard]] static constexpr MITCommand decode_command(
+    [[nodiscard]] static std::optional<MITTelemetry> decode_telemetry(
         const std::array<uint8_t, 8>& payload, 
         const MITConfig& cfg = MITConfig{}) noexcept 
     {
-        const uint32_t p_int  = (static_cast<uint32_t>(payload[0]) << 8) | payload[1];
-        const uint32_t v_int  = (static_cast<uint32_t>(payload[2]) << 4) | (payload[3] >> 4);
-        const uint32_t kp_int = (static_cast<uint32_t>(payload[3] & 0x0F) << 8) | payload[4];
-        const uint32_t kd_int = (static_cast<uint32_t>(payload[5]) << 4) | (payload[6] >> 4);
-        const uint32_t t_int  = (static_cast<uint32_t>(payload[6] & 0x0F) << 8) | payload[7];
+        // 防禦 2.1: Reserved Bytes 位元遮罩比對 (MIT 回傳 Protocol 規定 DATA[6] 與 DATA[7] 必須為 0x00)
+        if (payload[6] != 0x00 || payload[7] != 0x00) {
+            return std::nullopt; // 位元損壞/非 MIT 回傳格式，直接丟棄
+        }
 
-        return MITCommand{
-            uint_to_float(p_int,  cfg.p_min,  cfg.p_max,  16),
-            uint_to_float(v_int,  cfg.v_min,  cfg.v_max,  12),
-            uint_to_float(kp_int, cfg.kp_min, cfg.kp_max, 12),
-            uint_to_float(kd_int, cfg.kd_min, cfg.kd_max, 12),
-            uint_to_float(t_int,  cfg.t_min,  cfg.t_max,  12)
-        };
-    }
-
-    /**
-     * @brief 解碼馬達回傳的 8-byte CAN Payload 還原為 MITTelemetry 狀態物件 (RX 實體數據)
-     */
-    [[nodiscard]] static constexpr MITTelemetry decode_telemetry(
-        const std::array<uint8_t, 8>& payload, 
-        const MITConfig& cfg = MITConfig{}) noexcept 
-    {
+        // 防禦 2.2: Device CAN ID 邊界檢查 (例如 CAN ID 不可為 0 或超過合理範圍)
         const uint8_t can_id = payload[0];
+        if (can_id == 0x00) {
+            return std::nullopt; // 無效裝置 ID 廣播或雜訊
+        }
 
+        // 解碼 Bit-Packing
         const uint32_t p_int = (static_cast<uint32_t>(payload[1]) << 8) | payload[2];
         const uint32_t v_int = (static_cast<uint32_t>(payload[3]) << 4) | (payload[4] >> 4);
         const uint32_t t_int = (static_cast<uint32_t>(payload[4] & 0x0F) << 8) | payload[5];
 
-        return MITTelemetry{
-            can_id,
-            uint_to_float(p_int, cfg.p_min, cfg.p_max, 16),
-            uint_to_float(v_int, cfg.v_min, cfg.v_max, 12),
-            uint_to_float(t_int, cfg.t_min, cfg.t_max, 12)
-        };
+        // 轉換為浮點數
+        const float pos = uint_to_float(p_int, cfg.p_min, cfg.p_max, 16);
+        const float vel = uint_to_float(v_int, cfg.v_min, cfg.v_max, 12);
+        const float trq = uint_to_float(t_int, cfg.t_min, cfg.t_max, 12);
+
+        // 防禦 2.3: NaN / Inf 數值合法性過濾
+        if (std::isnan(pos) || std::isinf(pos) ||
+            std::isnan(vel) || std::isinf(vel) ||
+            std::isnan(trq) || std::isinf(trq)) 
+        {
+            return std::nullopt;
+        }
+
+        // 防禦 2.4: 物理硬邊界 Sanity Check (防止 cfg 傳入極端值導致還原數據超越物理邊界)
+        if (pos < cfg.p_min || pos > cfg.p_max ||
+            vel < cfg.v_min || vel > cfg.v_max ||
+            trq < cfg.t_min || trq > cfg.t_max) 
+        {
+            return std::nullopt; // 數值超越物理邊界，認定為 Outlier Spike
+        }
+
+        return MITTelemetry{can_id, pos, vel, trq};
     }
 };
 
