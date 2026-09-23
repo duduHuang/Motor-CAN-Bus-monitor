@@ -141,9 +141,9 @@ class DedicatedKeyboardProvider(BaseTrajectoryProvider):
 # 預設多軸硬體參數組態
 # ==========================================
 DEFAULT_AXIS_SPECS = [
-    {"name": "FR_HipY", "id": 1, "kp": 42.0, "kd": 2.2, "stand_pos": -0.65, "min_pos": -3.0, "max_pos": 3.5},
-    {"name": "FR_Knee", "id": 2, "kp": 40.0, "kd": 2.6, "stand_pos": 1.30, "min_pos": -0.94, "max_pos": 1.44},
-    {"name": "FR_HipX", "id": 3, "kp": 35.0, "kd": 1.8, "stand_pos": 0.00, "min_pos": -0.5, "max_pos": 0.5},
+    {"name": "FR_HipX", "id": 1, "kp": 42.0, "kd": 2.2, "stand_pos": -0.65, "min_pos": -3.0, "max_pos": 3.5},
+    {"name": "FR_HipY", "id": 2, "kp": 40.0, "kd": 2.6, "stand_pos": 1.30, "min_pos": -0.94, "max_pos": 1.44},
+    {"name": "FR_Knee", "id": 3, "kp": 35.0, "kd": 2.5, "stand_pos": 144.00, "min_pos": 19.0, "max_pos": 145.0},
 ]
 
 
@@ -255,8 +255,8 @@ def print_ui(vms: List[MotorControlViewModel], channel: str, gravity_ff: bool):
 # ==========================================
 def main():
     parser = argparse.ArgumentParser(description="MVVM Multi-Axis Hardware Tuning Script with POST")
-    parser.add_argument("--axes", type=int, default=2, choices=[1, 2, 3], help="Active axes count (1~3)")
-    parser.add_argument("--can", type=str, default="can1", help="SocketCAN channel (e.g. can0/canfd0)")
+    parser.add_argument("--axes", type=int, default=3, choices=[1, 2, 3], help="Active axes count (1~3)")
+    parser.add_argument("--can", type=str, default="can2", help="SocketCAN channel (e.g. can0/canfd0)")
     args = parser.parse_args()
 
     # 1. 初始化 SocketCAN 網卡

@@ -1,3 +1,4 @@
+# run_12motor_fsm.py
 import time
 import sys
 import select
@@ -26,7 +27,6 @@ class NonBlockingKeyboard:
         return None
 
 def query_real_angles(buses, controllers, workers) -> dict:
-    """開機 0x9C 真實角度診斷"""
     angles_deg = {}
     print("\n[診斷] 正在發送 0x9C 查詢指令...")
     for ch in CAN_CHANNELS:
@@ -44,22 +44,23 @@ def query_real_angles(buses, controllers, workers) -> dict:
     return angles_deg
 
 def set_robot_posture(manager: MultiMotorViewModelManager, state: PostureState):
-    """向 12 顆馬達下發新姿態指令 (修正 ID{m_id} 綁定 Bug)"""
+    """向 12 顆馬達下發新姿態指令（使用 ViewModel 公共 API 訪問 Provider）"""
     for ch in CAN_CHANNELS:
         for m_id in [1, 2, 3]:
-            vm = manager.get_vm(f"{ch}_ID{m_id}")  # [修正] 正確抓取各軸 ViewModel
-            if vm and hasattr(vm, '_current_provider'):
-                vm._current_provider.set_target_state(state)
+            vm = manager.get_vm(f"{ch}_ID{m_id}")
+            if vm:
+                provider = vm.get_current_provider()
+                if provider and hasattr(provider, 'set_target_state'):
+                    provider.set_target_state(state)
 
 def main():
     print("==================================================")
-    print("  12 軸雙向姿態 FSM 控制器 (修正雙向 2 階段順序)")
+    print("  12 軸雙向姿態 FSM 控制器 (標準封裝介面重構版)")
     print("==================================================")
 
     manager = MultiMotorViewModelManager()
     buses, controllers, workers = {}, {}, {}
 
-    # STEP 1: 初始化 CAN 網卡與 ViewModel
     for ch in CAN_CHANNELS:
         try:
             bus = can.ThreadSafeBus(channel=ch, interface='socketcan')
@@ -68,7 +69,7 @@ def main():
             controllers[ch] = ctrl
             worker = MotorRxWorker(ctrl)
             worker.start()
-            workers[ch], controllers[ch] = worker, ctrl
+            workers[ch] = worker
             print(f"  [✓] 網卡 {ch} 初始化成功。")
         except Exception as e:
             print(f"  [X] 開啟網卡 {ch} 失敗: {e}"); return
@@ -83,10 +84,11 @@ def main():
                 channel=ch, motor_id=m_id,
                 kp_soft=35.0, kp_hard=55.0, kd=2.5, tau_max=3.0
             )
-            vm._current_provider = provider
+            
+            # 使用規範介面注入 Provider
+            vm.set_provider_instance(provider)
             manager.add_motor(key=vm_key, vm=vm, channel=ch, motor_id=m_id)
 
-    # STEP 2: 安全診斷
     real_angles = query_real_angles(buses, controllers, workers)
     has_error = False
     for key, deg in real_angles.items():
@@ -145,7 +147,7 @@ def main():
     finally:
         print("\n[安全關閉] 正在將姿態平滑歸位趴下...")
         set_robot_posture(manager, PostureState.PRONE)
-        time.sleep(2.5)  # 留足 2.3 秒過渡時間讓全車安全臥倒
+        time.sleep(2.5)
         
         manager.stop_all()
         for w in workers.values(): w.stop()
