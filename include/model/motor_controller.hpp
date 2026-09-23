@@ -87,6 +87,11 @@ public:
     uint64_t get_rx_count() const noexcept;
 
 private:
+    /**
+     * @brief 第四層防禦：配置硬體通訊中斷保護 (0xB3)
+     */
+    void setup_hardware_watchdog(uint32_t timeout_ms = 300) noexcept;
+
     SocketCANInterface              can_iface_;
     MotorStateDB                    state_db_;
     std::unique_ptr<RxWorker>       rx_worker_;

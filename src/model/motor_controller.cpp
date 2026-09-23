@@ -1,6 +1,7 @@
 #include "model/motor_controller.hpp"
 #include <iostream>
 #include <linux/can.h>
+#include <unistd.h>
 
 namespace robot::model {
 
@@ -16,39 +17,42 @@ bool MotorController::init(const std::string& interface_name, int rx_core_id) no
     }
 
     // 1. 初始化 SocketCAN 介面
-    if (!can_iface_.open_interface(interface_name)) {
+    if (!can_iface_.open(interface_name)) {
         return false;
     }
 
-    // 2. 配置 SocketCAN Kernel/硬體濾波器 (只接收 0x241~0x27F 與 0x501~0x53F)
-    struct can_filter rfilter[2];
-    // 單機模式回傳區段 (0x240 Mask 0x7C0 -> 0x240~0x27F)
-    rfilter[0].can_id   = SINGLE_MOTOR_BASE_RX;
-    rfilter[0].can_mask = 0x7C0;
-    // 運動模式回傳區段 (0x500 Mask 0x7C0 -> 0x500~0x53F)
-    rfilter[1].can_id   = MOTION_MODE_BASE_RX;
-    rfilter[1].can_mask = 0x7C0;
-
-    if (!can_iface_.set_filters(rfilter, 2)) {
-        can_iface_.close_interface();
-        return false;
-    }
-
-    // 3. 實例化並啟動 RxWorker (綁定核心與設定 Real-time 優先權)
+    // 2. 實例化並啟動 RxWorker (內部會配置 SCHED_FIFO 與 Core Affinity)
     try {
-        rx_worker_ = std::make_unique<RxWorker>(can_iface_, state_db_);
-        if (!rx_worker_->start(rx_core_id, 85)) { // RxWorker 優先權 85
-            can_iface_.close_interface();
+        rx_worker_ = std::make_unique<RxWorker>(can_iface_, state_db_, rx_core_id, 90);
+        if (!rx_worker_->start()) {
+            can_iface_.close();
             rx_worker_.reset();
             return false;
         }
     } catch (...) {
-        can_iface_.close_interface();
+        can_iface_.close();
         return false;
     }
 
     is_initialized_.store(true, std::memory_order_release);
+    // 第四層防禦：啟動後立即對 12 顆馬達下發 0xB3 斷聯保護指令
+    setup_hardware_watchdog(300); // 設定 300ms 抱閘鎖死保護
     return true;
+}
+
+void MotorController::setup_hardware_watchdog(uint32_t timeout_ms) noexcept {
+    // 依據通訊手冊組裝 0xB3 指令[cite: 8]
+    std::array<uint8_t, 8> payload = {0xB3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    payload[4] = static_cast<uint8_t>(timeout_ms & 0xFF);          // CanRecvTime_MS low byte 1[cite: 8]
+    payload[5] = static_cast<uint8_t>((timeout_ms >> 8) & 0xFF);   // CanRecvTime_MS byte 2[cite: 8]
+    payload[6] = static_cast<uint8_t>((timeout_ms >> 16) & 0xFF);  // CanRecvTime_MS byte 3[cite: 8]
+    payload[7] = static_cast<uint8_t>((timeout_ms >> 24) & 0xFF);  // CanRecvTime_MS byte 4[cite: 8]
+
+    // 依序向四足 12 顆馬達發出設定，掉電後會存入 ROM[cite: 8]
+    for (uint8_t id = 1; id <= MAX_MOTOR_ID; ++id) {
+        send_single_command(id, payload);
+        usleep(1000); // 避免瞬間塞爆 SocketCAN TX Buffer (僅於初始化時使用)
+    }
 }
 
 void MotorController::stop() noexcept {
@@ -102,6 +106,11 @@ bool MotorController::send_motion_command(uint8_t motor_id, const std::array<uin
 bool MotorController::get_mit_telemetry(uint8_t motor_id, MITTelemetry& out_data) const noexcept {
     if (!is_initialized_.load(std::memory_order_relaxed)) {
         return false;
+    }
+    // 第四層防禦：檢查馬達是否回報 Fault，或資料已嚴重過期 (Stale > 300ms)
+    // 假設 MotorStateDB 內部實作了基於 monotonic clock 的超時判定
+    if (state_db_.is_motor_faulted(motor_id) || state_db_.is_telemetry_stale(motor_id, 300'000'000ULL)) {
+        return false; // 強制回傳 false，讓 1000Hz 迴圈引發 Cascade E-STOP
     }
     return state_db_.get_mit_telemetry(motor_id, out_data);
 }

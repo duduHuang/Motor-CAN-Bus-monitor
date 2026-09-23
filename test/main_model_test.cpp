@@ -116,6 +116,8 @@ int main(int argc, char** argv) {
     // 取得當前 Monotonic 時間作為基準起點
     clock_gettime(CLOCK_MONOTONIC, &next_wake);
 
+    bool cascade_estop_triggered = false;
+    size_t executed_loops = 0;
     // =========================================================================
     // 1000Hz (1ms) 嚴格即時控制迴圈 (Zero-Allocation / Zero-System I/O inside)
     // =========================================================================
@@ -133,7 +135,12 @@ int main(int argc, char** argv) {
         controller.send_motion_command(TEST_MOTOR_ID, mit_zero_payload);
 
         // 2. 讀取最新遙測資料 (Lock-free non-blocking query)
-        controller.get_mit_telemetry(TEST_MOTOR_ID, mit_rx_data);
+        if (!controller.get_mit_telemetry(TEST_MOTOR_ID, mit_rx_data)) {
+            // E-STOP 處理：設定旗標並中斷迴圈，避免迴圈內做任何 I/O
+            cascade_estop_triggered = true;
+            break;
+        }
+        executed_loops++;
     }
     // =========================================================================
 
@@ -179,6 +186,15 @@ int main(int argc, char** argv) {
     std::cout << " Priority Inversion: NONE (Lock-free DB & SCHED_FIFO)\n";
     std::cout << "---------------------------------------------------------\n";
 
+    // 離開 RT 迴圈後，才進行 I/O 輸出
+    if (cascade_estop_triggered) {
+        std::cerr << "\n🚨 [CASCADE E-STOP] 觸發！原因：通訊超時 (>0.3s) 或馬達硬體 Fault！\n";
+        // 下發停止指令
+        std::array<uint8_t, 8> stop_cmd = {0x81, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // 0x81 Stop command[cite: 8]
+        controller.send_single_command(TEST_MOTOR_ID, stop_cmd);
+    }
+
+    std::cout << "[INFO] 控制迴圈退出，執行次數: " << executed_loops << "\n";
     controller.stop();
     return EXIT_SUCCESS;
 }
