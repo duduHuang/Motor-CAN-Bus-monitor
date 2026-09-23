@@ -113,12 +113,8 @@ bool SocketCANInterface::send_frame(uint32_t can_id, const std::array<uint8_t, 8
 
     // MSG_DONTWAIT 雙重保障非阻塞寫入
     ssize_t nbytes = ::send(fd_, &frame, sizeof(struct can_frame), MSG_DONTWAIT);
-    if (nbytes != sizeof(struct can_frame)) [[unlikely]] {
-        // 當 EAGAIN 或 EWOULDBLOCK 時表示 Socket 緩衝區滿，直接丟棄/記錄並 return false，不阻塞 RT 迴圈
-        return false;
-    }
-
-    return true;
+    // 發生 EAGAIN (Buffer Full) 直接返回 false 交由上層決定是否重傳，不拋出 Exception
+    return (nbytes == sizeof(struct can_frame));
 }
 
 bool SocketCANInterface::recv_frame(uint32_t& can_id, std::array<uint8_t, 8>& payload) noexcept {
@@ -127,15 +123,41 @@ bool SocketCANInterface::recv_frame(uint32_t& can_id, std::array<uint8_t, 8>& pa
     }
 
     struct can_frame frame;
-    // MSG_DONTWAIT 保障當前無封包時立即 return -1 並設置 errno = EAGAIN
-    ssize_t nbytes = ::recv(fd_, &frame, sizeof(struct can_frame), MSG_DONTWAIT);
-    if (nbytes != sizeof(struct can_frame)) [[unlikely]] {
-        return false;
-    }
+    // 使用 while 迴圈：如果讀取到的是被判定為 EMI 雜訊的封包，直接在底層丟棄並繼續讀取下一個，
+    // 直到讀出合法封包，或是 RX Queue 讀空 (返回 EAGAIN) 為止。
+    while (true) {
+        ssize_t nbytes = ::recv(fd_, &frame, sizeof(struct can_frame), MSG_DONTWAIT);
+        
+        if (nbytes < 0) {
+            // Queue 為空 (EAGAIN / EWOULDBLOCK)，立刻退出，不阻擋 1000Hz 迴圈
+            return false;
+        }
 
-    can_id = frame.can_id;
-    std::memcpy(payload.data(), frame.data, 8);
-    return true;
+        if (nbytes != sizeof(struct can_frame)) [[unlikely]] {
+            continue; 
+        }
+
+        // ==========================================
+        // 第一層防禦 (Layer 1 Defense): 物理與資料鏈結層雜訊過濾
+        // ==========================================
+        
+        // 1. 擋掉 EFF (Extended), RTR (Remote), ERR (Error) 錯誤或非標準格式封包
+        if (frame.can_id & (CAN_EFF_FLAG | CAN_RTR_FLAG | CAN_ERR_FLAG)) [[unlikely]] {
+            continue; // 直接捨棄此幀
+        }
+
+        // 2. 嚴格校驗 DLC 長度 (Servo Motor Protocol V4.4 規定長度固定為 8 字節)
+        if (frame.can_dlc != 8) [[unlikely]] {
+            continue; // 直接捨棄此幀
+        }
+
+        // ==========================================
+
+        // 遮蔽保留位元，提取純粹的 11-bit CAN ID
+        can_id = frame.can_id & CAN_SFF_MASK;
+        std::memcpy(payload.data(), frame.data, 8);
+        return true;
+    }
 }
 
 } // namespace model
