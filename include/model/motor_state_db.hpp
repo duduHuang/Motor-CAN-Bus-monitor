@@ -100,15 +100,18 @@ struct alignas(64) MotorSlot {
     SeqlockSlot<MITTelemetry> mit_telemetry;
     SeqlockSlot<StandardMotionTelemetry> motion_telemetry;
     SeqlockSlot<SensorStatus1Telemetry> sensor_telemetry;
+    
+    // 【第四層防禦】硬體/上位機 Fault 與 Cascade E-STOP 觸發標記
+    std::atomic<bool> is_faulted{false};
 };
 
 /**
  * @brief 馬達狀態資料庫 (MotorStateDB) - 單例類別
- * 零動態記憶體分配 (Zero-Allocation)，全靜態預分配陣列 (`MAX_MOTORS = 16`)
+ * 零動態記憶體分配 (Zero-Allocation)，全靜態預分配陣列 (`MAX_MOTORS = 63`)
  */
 class MotorStateDB {
 public:
-    static constexpr uint8_t MAX_MOTORS = 16;
+    static constexpr uint8_t MAX_MOTORS = 63; // 支援最大馬達 ID (1~63)
 
     static MotorStateDB& instance() noexcept;
 
@@ -128,6 +131,18 @@ public:
     bool get_motion_telemetry(uint8_t motor_id, StandardMotionTelemetry& out_data, double& out_timestamp) const noexcept;
     bool get_sensor_telemetry(uint8_t motor_id, SensorStatus1Telemetry& out_data, double& out_timestamp) const noexcept;
 
+    // === 【第四層防禦 API】Stale Data 防護與 Fault 標記管理 ===
+    /**
+     * @brief 判斷馬達數據是否已過期 (Stale Data 防護)
+     * @param motor_id 馬達 ID (1~63)
+     * @param max_stale_sec 允許的最大陳舊時間（預設 0.3 秒）
+     * @return true 代表資料已超時或從未接收；false 代表資料新鮮可用
+     */
+    bool is_telemetry_stale(uint8_t motor_id, double max_stale_sec = 0.3) const noexcept;
+
+    void set_fault(uint8_t motor_id, bool faulted) noexcept;
+    bool get_fault(uint8_t motor_id) const noexcept;
+
     // 取得高精度單調時間戳記 (CLOCK_MONOTONIC)
     static double get_monotonic_time_sec() noexcept;
 
@@ -139,7 +154,7 @@ private:
         return motor_id >= 1 && motor_id <= MAX_MOTORS;
     }
 
-    // 預先配置 16 顆馬達靜態記憶體 (ID 1~16 對應 Index 0~15)
+    // 預先配置 63 顆馬達靜態記憶體 (ID 1~63 對應 Index 0~62)
     alignas(64) std::array<MotorSlot, MAX_MOTORS> slots_{};
 };
 
