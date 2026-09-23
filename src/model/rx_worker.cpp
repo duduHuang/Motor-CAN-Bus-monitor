@@ -76,46 +76,46 @@ inline void RxWorker::process_kinematic_filter(uint8_t motor_id, MITTelemetry& t
 
 void RxWorker::worker_loop() {
     // 嚴格禁忌：在此函數內部絕對禁止 new, malloc, std::cout, printf, mutex.lock()
-    struct can_frame frame{};
+    uint32_t can_id = 0;
+    std::array<uint8_t, 8> payload{};
+
     MITTelemetry mit_telemetry{};
-    StandardMotionTelemetry motion_telemetry{};
-    SensorStatus1Telemetry status1_telemetry{};
 
     while (running_.load(std::memory_order_relaxed)) {
-        // 必須使用 O_NONBLOCK 模式的 recv_frame
-        if (socket_can_.recv_frame(frame)) {
-            const uint32_t can_id = frame.can_id & CAN_EFF_MASK;
-            const uint8_t* payload = frame.data;
+        // 使用 SocketCANInterface 宣告的 (can_id, payload) 介面[cite: 7, 8]
+        if (socket_can_.recv_frame(can_id, payload)) {
+            const uint32_t clean_id = can_id & 0x1FFFFFFF;
 
-            // 1. MIT 運動模式 (0x501 ~ 0x53F)
-            if (can_id > 0x500 && can_id <= 0x53F) {
-                const uint8_t motor_id = static_cast<uint8_t>(can_id - 0x500);
-                if (MITProtocol::decode(payload, mit_telemetry)) {
-                    // 進入第三層防禦濾波與 DB 無鎖寫入
+            // 1. MIT 運動模式區段 (0x501 ~ 0x53F)
+            if (clean_id > 0x500 && clean_id <= 0x53F) {
+                const uint8_t motor_id = static_cast<uint8_t>(clean_id - 0x500);
+                
+                // 第二層防禦：NaN/Inf 數值合法性檢查[cite: 7]
+                auto decoded_mit = MITProtocol::decode_telemetry(payload);
+                if (decoded_mit.has_value()) {
+                    mit_telemetry = decoded_mit.value();
+                    // 第三層防禦：運動學去脈衝與 3 幀 Debounce 消抖[cite: 7, 8]
                     process_kinematic_filter(motor_id, mit_telemetry);
                 }
             } 
-            // 2. 單機狀態回傳 (0x241 ~ 0x27F)
-            else if (can_id > 0x240 && can_id <= 0x27F) {
-                const uint8_t motor_id = static_cast<uint8_t>(can_id - 0x240);
-                const uint8_t cmd_type = payload[0];
+            // 2. 單機模式區段 (0x241 ~ 0x27F)
+            else if (clean_id > 0x240 && clean_id <= 0x27F) {
+                const uint8_t motor_id = static_cast<uint8_t>(clean_id - 0x240);
+                
+                // 使用 ServoDecoder::decode_any 搭配 std::get_if[cite: 7, 8]
+                auto decoded = servo_robot::protocol::ServoDecoder::decode_any(payload);
 
-                if (cmd_type == 0x9C) {
-                    if (ServoDecoder::decode_motion(payload, motion_telemetry)) {
-                        db_.update_motion_telemetry(motor_id, motion_telemetry);
-                    }
-                } else if (cmd_type == 0x9A) {
-                    if (ServoDecoder::decode_status1(payload, status1_telemetry)) {
-                        db_.update_status1_telemetry(motor_id, status1_telemetry);
-                    }
+                if (auto* motion = std::get_if<servo_robot::protocol::StandardMotionTelemetry>(&decoded)) {
+                    db_.update_motion_telemetry(motor_id, *motion);
+                } else if (auto* sensor = std::get_if<servo_robot::protocol::SensorStatus1Telemetry>(&decoded)) {
+                    db_.update_sensor_telemetry(motor_id, *sensor);
                 }
             }
         } else {
-            // 無封包時的硬體層級讓出 (Hardware Pause)，防止 Core 吃滿 100% 功耗，且不會像 sleep 導致 OS 排程延遲
-            #if defined(__aarch64__)
-                asm volatile("yield" ::: "memory"); // Jetson ARM Cortex-A78AE
+            #if defined(__aarch64__) || defined(_M_ARM64)
+            asm volatile("yield" ::: "memory");
             #elif defined(__x86_64__)
-                asm volatile("pause" ::: "memory"); // x86 備用
+            asm volatile("pause" ::: "memory");
             #endif
         }
     }

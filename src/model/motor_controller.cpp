@@ -65,7 +65,7 @@ void MotorController::stop() noexcept {
         rx_worker_.reset();
     }
 
-    can_iface_.close_interface();
+    can_iface_.close();
 }
 
 bool MotorController::send_single_command(uint8_t motor_id, const std::array<uint8_t, 8>& payload) noexcept {
@@ -109,10 +109,11 @@ bool MotorController::get_mit_telemetry(uint8_t motor_id, MITTelemetry& out_data
     }
     // 第四層防禦：檢查馬達是否回報 Fault，或資料已嚴重過期 (Stale > 300ms)
     // 假設 MotorStateDB 內部實作了基於 monotonic clock 的超時判定
-    if (state_db_.is_motor_faulted(motor_id) || state_db_.is_telemetry_stale(motor_id, 300'000'000ULL)) {
-        return false; // 強制回傳 false，讓 1000Hz 迴圈引發 Cascade E-STOP
+    if (state_db_.get_fault(motor_id) || state_db_.is_telemetry_stale(motor_id, 0.3)) {
+        return false; // 回傳 false 觸發 1000Hz 主控制迴圈之 Cascade E-STOP
     }
-    return state_db_.get_mit_telemetry(motor_id, out_data);
+    double out_ts = 0.0;
+    return state_db_.get_mit_telemetry(motor_id, out_data, out_ts);
 }
 
 bool MotorController::get_motion_telemetry(uint8_t motor_id, StandardMotionTelemetry& out_data) const noexcept {
