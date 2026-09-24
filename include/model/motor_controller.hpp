@@ -77,6 +77,21 @@ public:
     bool get_motion_telemetry(uint8_t motor_id, StandardMotionTelemetry& out_data) const noexcept;
 
     /**
+     * @brief 從 MotorStateDB 讀取最新 0xA6 單圈運動狀態 (Non-blocking)
+     */
+    bool get_single_turn_telemetry(uint8_t motor_id, SingleTurnMotionTelemetry& out_data) const noexcept;
+    // 在 MotorController 類別 public 區塊補上：
+    /**
+     * @brief 從 MotorStateDB 讀取最新 0x9A 感測器與錯誤狀態 (Non-blocking)
+     */
+    bool get_sensor_telemetry(uint8_t motor_id, SensorStatus1Telemetry& out_data) const noexcept;
+
+    /**
+     * @brief 從 MotorStateDB 讀取最新 0x9D 感測器狀態 (Non-blocking)
+     */
+    bool get_sensor3_telemetry(uint8_t motor_id, SensorStatus3Telemetry& out_data) const noexcept;
+
+    /**
      * @brief 取得累計 TX 發送封包數
      */
     uint64_t get_tx_count() const noexcept { return tx_count_.load(std::memory_order_relaxed); }

@@ -175,7 +175,12 @@ ServoTelemetry ServoDecoder::decode_any(const std::array<uint8_t, 8>& payload) n
             MotorModelTelemetry t;
             t.cmd_echo    = cmd_echo;
             t.start_index = payload[2];
-            std::memcpy(t.model_chars.data(), &payload[3], 5);
+            std::fill(t.model_chars.begin(), t.model_chars.end(), '\0');
+            for (size_t i = 0; i < 5; ++i) {
+                // 如果遇到 0x00 提早結束，避免讀進不可見雜訊
+                if (payload[3 + i] == 0x00) break;
+                t.model_chars[i] = static_cast<char>(payload[3 + i]);
+            }
             return t;
         }
 

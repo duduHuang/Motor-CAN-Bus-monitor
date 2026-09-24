@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <string>
 
-namespace model {
+// 修正：將 namespace 改為 robot::model 與專案其他檔案對齊
+namespace robot::model {
 
 /**
  * @brief 高效能、零動態記憶體分配 (Zero-Allocation)、非阻塞 (Zero-Blocking) SocketCAN 驅動類別
@@ -59,6 +60,6 @@ private:
     int fd_{-1};
 };
 
-} // namespace model
+} // namespace robot::model
 
 #endif // MODEL_SOCKET_CAN_INTERFACE_HPP_

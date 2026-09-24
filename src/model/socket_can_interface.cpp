@@ -13,7 +13,7 @@
 #include <linux/can.h>
 #include <linux/can/raw.h>
 
-namespace model {
+namespace robot::model {
 
 SocketCANInterface::~SocketCANInterface() noexcept {
     close();
@@ -128,7 +128,7 @@ bool SocketCANInterface::recv_frame(uint32_t& can_id, std::array<uint8_t, 8>& pa
     while (true) {
         ssize_t nbytes = ::recv(fd_, &frame, sizeof(struct can_frame), MSG_DONTWAIT);
         
-        if (nbytes < 0) {
+        if (nbytes <= 0) {
             // Queue 為空 (EAGAIN / EWOULDBLOCK)，立刻退出，不阻擋 1000Hz 迴圈
             return false;
         }
@@ -160,4 +160,4 @@ bool SocketCANInterface::recv_frame(uint32_t& can_id, std::array<uint8_t, 8>& pa
     }
 }
 
-} // namespace model
+} // namespace robot::model

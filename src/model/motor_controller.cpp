@@ -2,6 +2,8 @@
 #include <iostream>
 #include <linux/can.h>
 #include <unistd.h>
+#include <thread>
+#include <chrono>
 
 namespace robot::model {
 
@@ -51,7 +53,7 @@ void MotorController::setup_hardware_watchdog(uint32_t timeout_ms) noexcept {
     // 依序向四足 12 顆馬達發出設定，掉電後會存入 ROM[cite: 8]
     for (uint8_t id = 1; id <= MAX_MOTOR_ID; ++id) {
         send_single_command(id, payload);
-        usleep(1000); // 避免瞬間塞爆 SocketCAN TX Buffer (僅於初始化時使用)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1)); // 避免瞬間塞爆 SocketCAN TX Buffer (僅於初始化時使用)
     }
 }
 
@@ -73,7 +75,7 @@ bool MotorController::send_single_command(uint8_t motor_id, const std::array<uin
         return false;
     }
     const uint32_t can_id = SINGLE_MOTOR_BASE_TX + motor_id;
-    if (can_iface_.send_frame(can_id, payload.data(), 8)) {
+    if (can_iface_.send_frame(can_id, payload)) {
         tx_count_.fetch_add(1, std::memory_order_relaxed);
         return true;
     }
@@ -84,7 +86,7 @@ bool MotorController::send_multi_command(const std::array<uint8_t, 8>& payload) 
     if (!is_initialized_.load(std::memory_order_relaxed)) {
         return false;
     }
-    if (can_iface_.send_frame(MULTI_MOTOR_BASE_TX, payload.data(), 8)) {
+    if (can_iface_.send_frame(MULTI_MOTOR_BASE_TX, payload)) {
         tx_count_.fetch_add(1, std::memory_order_relaxed);
         return true;
     }
@@ -96,7 +98,7 @@ bool MotorController::send_motion_command(uint8_t motor_id, const std::array<uin
         return false;
     }
     const uint32_t can_id = MOTION_MODE_BASE_TX + motor_id;
-    if (can_iface_.send_frame(can_id, payload.data(), 8)) {
+    if (can_iface_.send_frame(can_id, payload)) {
         tx_count_.fetch_add(1, std::memory_order_relaxed);
         return true;
     }
@@ -120,7 +122,28 @@ bool MotorController::get_motion_telemetry(uint8_t motor_id, StandardMotionTelem
     if (!is_initialized_.load(std::memory_order_relaxed)) {
         return false;
     }
-    return state_db_.get_motion_telemetry(motor_id, out_data);
+    double dummy_ts = 0.0;
+    return state_db_.get_motion_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_single_turn_telemetry(uint8_t motor_id, SingleTurnMotionTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_single_turn_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_sensor_telemetry(uint8_t motor_id, SensorStatus1Telemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) {
+        return false;
+    }
+    double dummy_ts = 0.0;
+    return state_db_.get_sensor_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_sensor3_telemetry(uint8_t motor_id, SensorStatus3Telemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_sensor3_telemetry(motor_id, out_data, dummy_ts);
 }
 
 uint64_t MotorController::get_rx_count() const noexcept {
