@@ -3,14 +3,40 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <variant>
+#include <chrono>
 
 namespace robot::model {
 
-RxWorker::RxWorker(SocketCANInterface& socket_can, MotorStateDB& db, int cpu_core, int rt_priority)
-    : socket_can_(socket_can), db_(db), cpu_core_(cpu_core), rt_priority_(rt_priority) {}
+RxWorker::RxWorker(SocketCANInterface& socket_can, MotorStateDB& db, CANFrameLogger& logger, int cpu_core, int rt_priority)
+    : socket_can_(socket_can), db_(db), logger_(logger), cpu_core_(cpu_core), rt_priority_(rt_priority) {}
 
 RxWorker::~RxWorker() {
     stop();
+}
+
+void RxWorker::add_rx_callback(RxMessageCallback cb) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (cb) {
+        callbacks_.push_back(std::move(cb));
+    }
+}
+
+inline void RxWorker::notify_callbacks(uint8_t motor_id, const RxTelemetryMessage& msg) {
+    // 1. 立即上鎖，保護對 vector 的讀取與遍歷，消除 Data Race
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    
+    // 2. 確定有註冊 Callback 才進行後續處理
+    if (callbacks_.empty()) return;
+
+    // 3. 在確定需要發送通知時才擷取高精度時間戳
+    const auto now = std::chrono::system_clock::now();
+    const double ts = std::chrono::duration<double>(now.time_since_epoch()).count();
+
+    // 4. 執行分發
+    for (const auto& cb : callbacks_) {
+        cb(motor_id, msg, ts);
+    }
 }
 
 bool RxWorker::start() {
@@ -67,16 +93,12 @@ inline void RxWorker::process_kinematic_filter(uint8_t motor_id, MITTelemetry& t
         filter.error_count++;
         
         if (filter.error_count >= KinematicFilter::DEBOUNCE_THRESHOLD) {
-            // 連續 N 幀異常：確認為真實故障/過速，透過無鎖 DB 標記 E-STOP 狀態
             db_.set_fault(motor_id, true);
         } else {
-            // 單一/少數突波：消抖機制 (用上一幀的合理數值覆蓋掉當前的垃圾數據)
             telemetry.position_rad = filter.last_position_rad;
-            // 寫入修復後的數據至 DB (確保 1000Hz 控制迴圈不會因為這一幀解算出暴衝的 KP/KD 扭矩)
             db_.update_mit_telemetry(motor_id, telemetry);
         }
     } else {
-        // 數據正常，重置錯誤計數，更新上一幀姿態，並寫入無鎖 DB
         filter.error_count = 0;
         filter.last_position_rad = telemetry.position_rad;
         db_.update_mit_telemetry(motor_id, telemetry);
@@ -84,44 +106,79 @@ inline void RxWorker::process_kinematic_filter(uint8_t motor_id, MITTelemetry& t
 }
 
 void RxWorker::worker_loop() {
-    // 嚴格禁忌：在此函數內部絕對禁止 new, malloc, std::cout, printf, mutex.lock()
     uint32_t can_id = 0;
     std::array<uint8_t, 8> payload{};
     MITTelemetry mit_telemetry{};
 
     while (running_.load(std::memory_order_relaxed)) {
-        // 使用 SocketCANInterface 宣告的 (can_id, payload) 介面
         if (socket_can_.recv_frame(can_id, payload)) {
             rx_count_.fetch_add(1, std::memory_order_relaxed);
+            logger_.add_log(can_id, payload, false);
             const uint32_t clean_id = can_id & 0x1FFFFFFF;
 
             // 1. MIT 運動模式區段 (0x501 ~ 0x53F)
             if (clean_id > 0x500 && clean_id <= 0x53F) {
                 const uint8_t motor_id = static_cast<uint8_t>(clean_id - 0x500);
                 
-                // 第二層防禦：NaN/Inf 數值合法性檢查
                 auto decoded_mit = MITProtocol::decode_telemetry(payload);
                 if (decoded_mit.has_value()) {
                     mit_telemetry = decoded_mit.value();
-                    // 第三層防禦：運動學去脈衝與 3 幀 Debounce 消抖
                     process_kinematic_filter(motor_id, mit_telemetry);
+                    // =====================================
+                    // 觸發 MIT 封包 Callback
+                    // =====================================
+                    RxTelemetryMessage msg;
+                    msg.payload = mit_telemetry;
+                    notify_callbacks(motor_id, msg);
                 }
             } 
             // 2. 單機模式區段 (0x241 ~ 0x27F)
             else if (clean_id > 0x240 && clean_id <= 0x27F) {
                 const uint8_t motor_id = static_cast<uint8_t>(clean_id - 0x240);
                 
-                // 使用 ServoDecoder::decode_any 搭配 std::get_if
+                // 使用 ServoDecoder 解碼，搭配 std::visit 完整覆蓋所有 14 種 Telemetry 變體
                 auto decoded = servo_robot::protocol::ServoDecoder::decode_any(payload);
 
-                if (auto* motion = std::get_if<servo_robot::protocol::StandardMotionTelemetry>(&decoded)) {
-                    db_.update_motion_telemetry(motor_id, *motion);
-                } else if (auto* single_turn = std::get_if<servo_robot::protocol::SingleTurnMotionTelemetry>(&decoded)) {
-                    db_.update_single_turn_telemetry(motor_id, *single_turn); // [修正] 處理 0xA6
-                } else if (auto* sensor = std::get_if<servo_robot::protocol::SensorStatus1Telemetry>(&decoded)) {
-                    db_.update_sensor_telemetry(motor_id, *sensor);
-                } else if (auto* sensor3 = std::get_if<servo_robot::protocol::SensorStatus3Telemetry>(&decoded)) {
-                    db_.update_sensor3_telemetry(motor_id, *sensor3); // [修正] 處理 0x9D
+                std::visit([this, motor_id](auto&& arg) {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, servo_robot::protocol::StandardMotionTelemetry>) {
+                        db_.update_motion_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::SingleTurnMotionTelemetry>) {
+                        db_.update_single_turn_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::SensorStatus1Telemetry>) {
+                        db_.update_sensor_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::SensorStatus3Telemetry>) {
+                        db_.update_sensor3_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::PIDQueryTelemetry>) {
+                        db_.update_pid_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::AccelQueryTelemetry>) {
+                        db_.update_accel_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::EncoderPosTelemetry>) {
+                        db_.update_encoder_pos_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::ZeroOffsetTelemetry>) {
+                        db_.update_zero_offset_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::AngleQueryTelemetry>) {
+                        db_.update_angle_query_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::SystemModeTelemetry>) {
+                        db_.update_system_mode_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::SystemInfoTelemetry>) {
+                        db_.update_system_info_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::MotorModelTelemetry>) {
+                        db_.update_motor_model_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::WriteAckTelemetry>) {
+                        db_.update_write_ack_telemetry(motor_id, arg);
+                    } else if constexpr (std::is_same_v<T, servo_robot::protocol::UnknownTelemetry>) {
+                        // 雜訊/未定義封包過濾，不存入 DB
+                    }
+                }, decoded);
+                // =====================================
+                // 觸發 Servo 封包 Callback
+                // 若為雜訊(UnknownTelemetry) 則忽略不發送通知
+                // =====================================
+                if (!std::holds_alternative<servo_robot::protocol::UnknownTelemetry>(decoded)) {
+                    RxTelemetryMessage msg;
+                    msg.payload = decoded;
+                    notify_callbacks(motor_id, msg);
                 }
             }
         } else {

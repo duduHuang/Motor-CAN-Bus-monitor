@@ -6,11 +6,14 @@
 #include <atomic>
 #include <memory>
 #include <cstdint>
+#include <vector>
+#include <mutex>
 
 #include "model/socket_can_interface.hpp"
 #include "protocol/servo_protocol.hpp"
 #include "protocol/mit_protocol.hpp"
 #include "model/motor_state_db.hpp"
+#include "model/can_frame_logger.hpp"
 #include "model/rx_worker.hpp"
 
 namespace robot::model {
@@ -52,6 +55,11 @@ public:
     void stop() noexcept;
 
     /**
+     * @brief 註冊 RX 即時觸發 Callback (Observer Pattern)
+     */
+    void register_rx_callback(RxMessageCallback cb);
+
+    /**
      * @brief 發送單機控制指令 (Arbitration ID: 0x140 + motor_id)
      */
     bool send_single_command(uint8_t motor_id, const std::array<uint8_t, 8>& payload) noexcept;
@@ -91,6 +99,17 @@ public:
      */
     bool get_sensor3_telemetry(uint8_t motor_id, SensorStatus3Telemetry& out_data) const noexcept;
 
+    // === 階段二新增：查詢類別與 WriteAck Telemetry 讀取 API (Non-blocking) ===
+    bool get_pid_telemetry(uint8_t motor_id, PIDQueryTelemetry& out_data) const noexcept;
+    bool get_accel_telemetry(uint8_t motor_id, AccelQueryTelemetry& out_data) const noexcept;
+    bool get_encoder_pos_telemetry(uint8_t motor_id, EncoderPosTelemetry& out_data) const noexcept;
+    bool get_zero_offset_telemetry(uint8_t motor_id, ZeroOffsetTelemetry& out_data) const noexcept;
+    bool get_angle_query_telemetry(uint8_t motor_id, AngleQueryTelemetry& out_data) const noexcept;
+    bool get_system_mode_telemetry(uint8_t motor_id, SystemModeTelemetry& out_data) const noexcept;
+    bool get_system_info_telemetry(uint8_t motor_id, SystemInfoTelemetry& out_data) const noexcept;
+    bool get_motor_model_telemetry(uint8_t motor_id, MotorModelTelemetry& out_data) const noexcept;
+    bool get_write_ack_telemetry(uint8_t motor_id, WriteAckTelemetry& out_data) const noexcept;
+
     /**
      * @brief 取得累計 TX 發送封包數
      */
@@ -101,6 +120,11 @@ public:
      */
     uint64_t get_rx_count() const noexcept;
 
+    /**
+     * @brief 取得歷史 CAN 封包日誌格式化快照 (供 ViewModel/UI 輪詢顯示)
+     */
+    std::vector<std::string> get_can_logs() const { return can_logger_.get_logs_snapshot(); }
+
 private:
     /**
      * @brief 第四層防禦：配置硬體通訊中斷保護 (0xB3)
@@ -109,9 +133,13 @@ private:
 
     SocketCANInterface              can_iface_;
     MotorStateDB                    state_db_;
+    CANFrameLogger                  can_logger_;
     std::unique_ptr<RxWorker>       rx_worker_;
     std::atomic<uint64_t>           tx_count_{0};
     std::atomic<bool>               is_initialized_{false};
+    // Controller 端暫存之 Callbacks
+    std::vector<RxMessageCallback>  rx_callbacks_;
+    std::mutex                      callback_mutex_;
 };
 
 } // namespace robot::model

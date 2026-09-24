@@ -13,6 +13,16 @@ MotorController::~MotorController() noexcept {
     stop();
 }
 
+void MotorController::register_rx_callback(RxMessageCallback cb) {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    rx_callbacks_.push_back(cb);
+
+    // 如果 RxWorker 已經實例化並運行中，即時動態加入
+    if (rx_worker_) {
+        rx_worker_->add_rx_callback(cb);
+    }
+}
+
 bool MotorController::init(const std::string& interface_name, int rx_core_id) noexcept {
     if (is_initialized_.load(std::memory_order_acquire)) {
         return true;
@@ -25,7 +35,14 @@ bool MotorController::init(const std::string& interface_name, int rx_core_id) no
 
     // 2. 實例化並啟動 RxWorker (內部會配置 SCHED_FIFO 與 Core Affinity)
     try {
-        rx_worker_ = std::make_unique<RxWorker>(can_iface_, state_db_, rx_core_id, 90);
+        rx_worker_ = std::make_unique<RxWorker>(can_iface_, state_db_, can_logger_, rx_core_id, 90);
+        // 將 Controller 初始化前已註冊的 Callbacks 一併注入 RxWorker
+        {
+            std::lock_guard<std::mutex> lock(callback_mutex_);
+            for (const auto& cb : rx_callbacks_) {
+                rx_worker_->add_rx_callback(cb);
+            }
+        }
         if (!rx_worker_->start()) {
             can_iface_.close();
             rx_worker_.reset();
@@ -43,14 +60,14 @@ bool MotorController::init(const std::string& interface_name, int rx_core_id) no
 }
 
 void MotorController::setup_hardware_watchdog(uint32_t timeout_ms) noexcept {
-    // 依據通訊手冊組裝 0xB3 指令[cite: 8]
+    // 依據通訊手冊組裝 0xB3 指令
     std::array<uint8_t, 8> payload = {0xB3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-    payload[4] = static_cast<uint8_t>(timeout_ms & 0xFF);          // CanRecvTime_MS low byte 1[cite: 8]
-    payload[5] = static_cast<uint8_t>((timeout_ms >> 8) & 0xFF);   // CanRecvTime_MS byte 2[cite: 8]
-    payload[6] = static_cast<uint8_t>((timeout_ms >> 16) & 0xFF);  // CanRecvTime_MS byte 3[cite: 8]
-    payload[7] = static_cast<uint8_t>((timeout_ms >> 24) & 0xFF);  // CanRecvTime_MS byte 4[cite: 8]
+    payload[4] = static_cast<uint8_t>(timeout_ms & 0xFF);          // CanRecvTime_MS low byte 1
+    payload[5] = static_cast<uint8_t>((timeout_ms >> 8) & 0xFF);   // CanRecvTime_MS byte 2
+    payload[6] = static_cast<uint8_t>((timeout_ms >> 16) & 0xFF);  // CanRecvTime_MS byte 3
+    payload[7] = static_cast<uint8_t>((timeout_ms >> 24) & 0xFF);  // CanRecvTime_MS byte 4
 
-    // 依序向四足 12 顆馬達發出設定，掉電後會存入 ROM[cite: 8]
+    // 依序向四足 12 顆馬達發出設定，掉電後會存入 ROM
     for (uint8_t id = 1; id <= MAX_MOTOR_ID; ++id) {
         send_single_command(id, payload);
         std::this_thread::sleep_for(std::chrono::milliseconds(1)); // 避免瞬間塞爆 SocketCAN TX Buffer (僅於初始化時使用)
@@ -77,6 +94,7 @@ bool MotorController::send_single_command(uint8_t motor_id, const std::array<uin
     const uint32_t can_id = SINGLE_MOTOR_BASE_TX + motor_id;
     if (can_iface_.send_frame(can_id, payload)) {
         tx_count_.fetch_add(1, std::memory_order_relaxed);
+        can_logger_.add_log(can_id, payload, true); // 記錄 TX
         return true;
     }
     return false;
@@ -88,6 +106,7 @@ bool MotorController::send_multi_command(const std::array<uint8_t, 8>& payload) 
     }
     if (can_iface_.send_frame(MULTI_MOTOR_BASE_TX, payload)) {
         tx_count_.fetch_add(1, std::memory_order_relaxed);
+        can_logger_.add_log(MULTI_MOTOR_BASE_TX, payload, true); // 記錄 TX
         return true;
     }
     return false;
@@ -100,6 +119,7 @@ bool MotorController::send_motion_command(uint8_t motor_id, const std::array<uin
     const uint32_t can_id = MOTION_MODE_BASE_TX + motor_id;
     if (can_iface_.send_frame(can_id, payload)) {
         tx_count_.fetch_add(1, std::memory_order_relaxed);
+        can_logger_.add_log(can_id, payload, true); // 記錄 TX
         return true;
     }
     return false;
@@ -144,6 +164,60 @@ bool MotorController::get_sensor3_telemetry(uint8_t motor_id, SensorStatus3Telem
     if (!is_initialized_.load(std::memory_order_relaxed)) return false;
     double dummy_ts = 0.0;
     return state_db_.get_sensor3_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_pid_telemetry(uint8_t motor_id, PIDQueryTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_pid_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_accel_telemetry(uint8_t motor_id, AccelQueryTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_accel_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_encoder_pos_telemetry(uint8_t motor_id, EncoderPosTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_encoder_pos_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_zero_offset_telemetry(uint8_t motor_id, ZeroOffsetTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_zero_offset_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_angle_query_telemetry(uint8_t motor_id, AngleQueryTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_angle_query_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_system_mode_telemetry(uint8_t motor_id, SystemModeTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_system_mode_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_system_info_telemetry(uint8_t motor_id, SystemInfoTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_system_info_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_motor_model_telemetry(uint8_t motor_id, MotorModelTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_motor_model_telemetry(motor_id, out_data, dummy_ts);
+}
+
+bool MotorController::get_write_ack_telemetry(uint8_t motor_id, WriteAckTelemetry& out_data) const noexcept {
+    if (!is_initialized_.load(std::memory_order_relaxed)) return false;
+    double dummy_ts = 0.0;
+    return state_db_.get_write_ack_telemetry(motor_id, out_data, dummy_ts);
 }
 
 uint64_t MotorController::get_rx_count() const noexcept {

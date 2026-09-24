@@ -14,7 +14,18 @@ namespace robot::model {
 // 使用 using 讓 DB 層直接引用 protocol 層的定義，避免重複定義與型別衝突
 using MITTelemetry = ::protocol::MITTelemetry;
 using StandardMotionTelemetry = ::servo_robot::protocol::StandardMotionTelemetry;
+using SingleTurnMotionTelemetry = ::servo_robot::protocol::SingleTurnMotionTelemetry;
 using SensorStatus1Telemetry = ::servo_robot::protocol::SensorStatus1Telemetry;
+using SensorStatus3Telemetry    = ::servo_robot::protocol::SensorStatus3Telemetry;
+using PIDQueryTelemetry         = ::servo_robot::protocol::PIDQueryTelemetry;
+using AccelQueryTelemetry       = ::servo_robot::protocol::AccelQueryTelemetry;
+using EncoderPosTelemetry       = ::servo_robot::protocol::EncoderPosTelemetry;
+using ZeroOffsetTelemetry       = ::servo_robot::protocol::ZeroOffsetTelemetry;
+using AngleQueryTelemetry       = ::servo_robot::protocol::AngleQueryTelemetry;
+using SystemModeTelemetry       = ::servo_robot::protocol::SystemModeTelemetry;
+using SystemInfoTelemetry       = ::servo_robot::protocol::SystemInfoTelemetry;
+using MotorModelTelemetry       = ::servo_robot::protocol::MotorModelTelemetry;
+using WriteAckTelemetry         = ::servo_robot::protocol::WriteAckTelemetry;
 
 /**
  * @brief Seqlock (Sequence Lock) 零記憶體分配無鎖資料槽
@@ -79,6 +90,15 @@ struct alignas(64) MotorSlot {
     SeqlockSlot<SingleTurnMotionTelemetry>  single_turn_telemetry;
     SeqlockSlot<SensorStatus1Telemetry>     sensor_telemetry;
     SeqlockSlot<SensorStatus3Telemetry>     sensor3_telemetry;
+    SeqlockSlot<PIDQueryTelemetry>          pid_telemetry;
+    SeqlockSlot<AccelQueryTelemetry>        accel_telemetry;
+    SeqlockSlot<EncoderPosTelemetry>        encoder_pos_telemetry;
+    SeqlockSlot<ZeroOffsetTelemetry>        zero_offset_telemetry;
+    SeqlockSlot<AngleQueryTelemetry>        angle_query_telemetry;
+    SeqlockSlot<SystemModeTelemetry>        system_mode_telemetry;
+    SeqlockSlot<SystemInfoTelemetry>        system_info_telemetry;
+    SeqlockSlot<MotorModelTelemetry>        motor_model_telemetry;
+    SeqlockSlot<WriteAckTelemetry>          write_ack_telemetry;
     
     // 【第四層防禦】硬體/上位機 Fault 與 Cascade E-STOP 觸發標記
     std::atomic<bool> is_faulted{false};
@@ -104,6 +124,15 @@ public:
     void update_single_turn_telemetry(uint8_t motor_id, const SingleTurnMotionTelemetry& data, double timestamp = 0.0) noexcept;
     void update_sensor_telemetry(uint8_t motor_id, const SensorStatus1Telemetry& data, double timestamp = 0.0) noexcept;
     void update_sensor3_telemetry(uint8_t motor_id, const SensorStatus3Telemetry& data, double timestamp = 0.0) noexcept;
+    void update_pid_telemetry(uint8_t motor_id, const PIDQueryTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_accel_telemetry(uint8_t motor_id, const AccelQueryTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_encoder_pos_telemetry(uint8_t motor_id, const EncoderPosTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_zero_offset_telemetry(uint8_t motor_id, const ZeroOffsetTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_angle_query_telemetry(uint8_t motor_id, const AngleQueryTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_system_mode_telemetry(uint8_t motor_id, const SystemModeTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_system_info_telemetry(uint8_t motor_id, const SystemInfoTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_motor_model_telemetry(uint8_t motor_id, const MotorModelTelemetry& data, double timestamp = 0.0) noexcept;
+    void update_write_ack_telemetry(uint8_t motor_id, const WriteAckTelemetry& data, double timestamp = 0.0) noexcept;
 
     // === 讀取 API ===
     bool get_mit_telemetry(uint8_t motor_id, MITTelemetry& out_data, double& out_timestamp) const noexcept;
@@ -111,6 +140,15 @@ public:
     bool get_single_turn_telemetry(uint8_t motor_id, SingleTurnMotionTelemetry& out_data, double& out_timestamp) const noexcept;
     bool get_sensor_telemetry(uint8_t motor_id, SensorStatus1Telemetry& out_data, double& out_timestamp) const noexcept;
     bool get_sensor3_telemetry(uint8_t motor_id, SensorStatus3Telemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_pid_telemetry(uint8_t motor_id, PIDQueryTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_accel_telemetry(uint8_t motor_id, AccelQueryTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_encoder_pos_telemetry(uint8_t motor_id, EncoderPosTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_zero_offset_telemetry(uint8_t motor_id, ZeroOffsetTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_angle_query_telemetry(uint8_t motor_id, AngleQueryTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_system_mode_telemetry(uint8_t motor_id, SystemModeTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_system_info_telemetry(uint8_t motor_id, SystemInfoTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_motor_model_telemetry(uint8_t motor_id, MotorModelTelemetry& out_data, double& out_timestamp) const noexcept;
+    bool get_write_ack_telemetry(uint8_t motor_id, WriteAckTelemetry& out_data, double& out_timestamp) const noexcept;
 
     bool is_telemetry_stale(uint8_t motor_id, double max_stale_sec = 0.3) const noexcept;
 
