@@ -120,7 +120,7 @@ void RxWorker::worker_loop() {
             if (clean_id > 0x500 && clean_id <= 0x53F) {
                 const uint8_t motor_id = static_cast<uint8_t>(clean_id - 0x500);
                 
-                auto decoded_mit = MITProtocol::decode_telemetry(payload);
+                auto decoded_mit = protocol::MITProtocol::decode_telemetry(payload);
                 if (decoded_mit.has_value()) {
                     mit_telemetry = decoded_mit.value();
                     process_kinematic_filter(motor_id, mit_telemetry);

@@ -18,6 +18,30 @@
 
 namespace robot::model {
 
+// RAII: In-flight 安全計數器防護
+class InFlightGuard {
+public:
+    explicit InFlightGuard(const std::atomic<bool>& is_running, std::atomic<int>& counter) noexcept
+        : counter_(counter), active_(false) {
+        if (!is_running.load(std::memory_order_seq_cst)) return;
+        counter_.fetch_add(1, std::memory_order_seq_cst);
+        if (!is_running.load(std::memory_order_seq_cst)) {
+            counter_.fetch_sub(1, std::memory_order_seq_cst);
+            return;
+        }
+        active_ = true;
+    }
+    ~InFlightGuard() {
+        if (active_) {
+            counter_.fetch_sub(1, std::memory_order_seq_cst);
+        }
+    }
+    bool is_active() const noexcept { return active_; }
+private:
+    std::atomic<int>& counter_;
+    bool active_;
+};
+
 /**
  * @brief MotorController 門面類別 (Facade)
  * 封裝底層 SocketCAN 通訊、CAN Filter 配置與 RxWorker 背景接收執行緒，
@@ -45,9 +69,14 @@ public:
      * @brief 初始化 SocketCAN、配置硬體 Filter 並啟動 RxWorker 背景監聽執行緒
      * @param interface_name CAN 介面名稱 (例如 "can0")
      * @param rx_core_id RxWorker 綁定之 CPU Core ID (預設 Core 5)
-     * @return true 初始化成功, false 初始化失敗
+     * @return false 表示控制器無法啟動。
+     *         true 表示通訊與 RX worker 已啟動；
+     *         呼叫者仍須檢查 is_degraded()，
+     *         確認 watchdog 是否全部成功送出。
      */
-    bool init(const std::string& interface_name, int rx_core_id = 5) noexcept;
+    bool init(const std::string& interface_name, 
+              const std::vector<uint8_t>& active_motor_ids, 
+              int rx_core_id = 5) noexcept;
 
     /**
      * @brief 停止背景 RxWorker 執行緒並關閉 SocketCAN 介面
@@ -58,6 +87,9 @@ public:
      * @brief 註冊 RX 即時觸發 Callback (Observer Pattern)
      */
     void register_rx_callback(RxMessageCallback cb);
+
+    bool is_running() const noexcept { return is_running_.load(std::memory_order_acquire); }
+    bool is_degraded() const noexcept { return is_degraded_.load(std::memory_order_acquire); } // 降級標記
 
     /**
      * @brief 發送單機控制指令 (Arbitration ID: 0x140 + motor_id)
@@ -88,7 +120,7 @@ public:
      * @brief 從 MotorStateDB 讀取最新 0xA6 單圈運動狀態 (Non-blocking)
      */
     bool get_single_turn_telemetry(uint8_t motor_id, SingleTurnMotionTelemetry& out_data) const noexcept;
-    // 在 MotorController 類別 public 區塊補上：
+
     /**
      * @brief 從 MotorStateDB 讀取最新 0x9A 感測器與錯誤狀態 (Non-blocking)
      */
@@ -129,15 +161,20 @@ private:
     /**
      * @brief 第四層防禦：配置硬體通訊中斷保護 (0xB3)
      */
-    void setup_hardware_watchdog(uint32_t timeout_ms = 300) noexcept;
+    bool setup_hardware_watchdog(const std::vector<uint8_t>& motor_ids, uint32_t timeout_ms = 300) noexcept;
+
+    std::mutex                      lifecycle_mutex_;           // 保護 init() 與 stop()
+    std::atomic<bool>               is_running_{false};         // 控制器主狀態
+    std::atomic<bool>               is_degraded_{false};
+    mutable std::atomic<int>        in_flight_operations_{0};   // 追蹤 RT 迴圈中的併發調用數量
+    mutable std::atomic<uint64_t>   cached_rx_count_{0};        // 停止後快取最後的 RX 計數
 
     SocketCANInterface              can_iface_;
-    MotorStateDB                    state_db_;
+    MotorStateDB                    state_db_;   // 安全持有獨立的實例
     CANFrameLogger                  can_logger_;
     std::unique_ptr<RxWorker>       rx_worker_;
     std::atomic<uint64_t>           tx_count_{0};
-    std::atomic<bool>               is_initialized_{false};
-    // Controller 端暫存之 Callbacks
+
     std::vector<RxMessageCallback>  rx_callbacks_;
     std::mutex                      callback_mutex_;
 };

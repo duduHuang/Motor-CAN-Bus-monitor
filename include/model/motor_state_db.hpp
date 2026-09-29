@@ -4,6 +4,7 @@
 #include <atomic>
 #include <array>
 #include <ctime>
+#include <type_traits>
 
 // 引入 protocol 層定義的結構體
 #include "protocol/mit_protocol.hpp"
@@ -28,53 +29,64 @@ using MotorModelTelemetry       = ::servo_robot::protocol::MotorModelTelemetry;
 using WriteAckTelemetry         = ::servo_robot::protocol::WriteAckTelemetry;
 
 /**
- * @brief Seqlock (Sequence Lock) 零記憶體分配無鎖資料槽
- * 專為 ARM Cortex-A78AE (ARMv8-A) 弱記憶體序 (Weakly-Ordered) 架構設計。
- * 透過顯式記憶體屏障 (Memory Fence / acquire-release) 保證 1000Hz RT 迴圈無競爭讀寫。
+ * @brief Thread-safe telemetry snapshot slot.
+ * std::atomic<T> 是否 lock-free 取決於目標平台；
+ * 部分型別可能透過 libatomic 實作。
+ *
+ * @note [Single-Writer Model] 此資料結構嚴格限制只能有單一寫入者 (RxWorker 執行緒)。
+ * 多個 Reader 可以並發讀取。
  */
 template <typename T>
 struct alignas(64) SeqlockSlot { // 64-byte 對齊，防止跨核 False Sharing
+    // 確保 T 是 Trivially Copyable，否則 std::atomic 無法正確運作
+    static_assert(std::is_trivially_copyable_v<T>, "T must be trivially copyable for Lock-free Seqlock");
+
     std::atomic<uint32_t> sequence{0};
-    T data{};
-    double timestamp{0.0};
+    
+    // 修正：使用 std::atomic 儲存 Payload，徹底消除 C++ 標準中的 Data Race (UB)
+    std::atomic<T> data{};
+    std::atomic<double> timestamp{0.0};
 
     /**
-     * @brief 寫入端 (CAN RX 背景執行緒，非阻塞)
+     * @brief 寫入端 (單一 CAN RX 背景執行緒，非阻塞)
      */
     void write(const T& new_data, double ts) noexcept {
         uint32_t current_seq = sequence.load(std::memory_order_relaxed);
         
         sequence.store(current_seq + 1, std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_release);
+        std::atomic_thread_fence(std::memory_order_release); // 確保 sequence 奇數狀態先被看見
 
-        data = new_data;
-        timestamp = ts;
+        // 修正：使用 relaxed 寫入。雖然是原子操作，但依靠上下的 Fence 保證順序
+        data.store(new_data, std::memory_order_relaxed);
+        timestamp.store(ts, std::memory_order_relaxed);
 
-        std::atomic_thread_fence(std::memory_order_release);
+        std::atomic_thread_fence(std::memory_order_release); // 確保 Payload 寫入完成才更新 sequence
         sequence.store(current_seq + 2, std::memory_order_release);
     }
 
     /**
-     * @brief 讀取端 (1000Hz RT 控制執行緒，非阻塞 O(1) 時間複雜度)
+     * @brief 讀取端 (1000Hz RT 控制執行緒等，支援多 Reader 並發非阻塞讀取)
      */
     bool read(T& out_data, double& out_ts) const noexcept {
         constexpr int MAX_RETRIES = 3;
         for (int retry = 0; retry < MAX_RETRIES; ++retry) {
             uint32_t seq1 = sequence.load(std::memory_order_acquire);
             
-            if (seq1 & 1) {
+            if (seq1 & 1) { // 如果是奇數，代表 Writer 正在寫入
 #if defined(__aarch64__)
                 asm volatile("yield" ::: "memory");
 #endif
                 continue;
             }
 
-            out_data = data;
-            out_ts = timestamp;
+            // 修正：使用 relaxed 讀取，消除 UB
+            out_data = data.load(std::memory_order_relaxed);
+            out_ts = timestamp.load(std::memory_order_relaxed);
 
-            std::atomic_thread_fence(std::memory_order_acquire);
+            std::atomic_thread_fence(std::memory_order_acquire); // 確保讀取完 Payload 才去檢查第二次 sequence
             uint32_t seq2 = sequence.load(std::memory_order_relaxed);
 
+            // 若前後 sequence 一致且為偶數，代表讀取期間沒有被 Writer 覆蓋
             if (seq1 == seq2) {
                 return true;
             }
@@ -83,7 +95,6 @@ struct alignas(64) SeqlockSlot { // 64-byte 對齊，防止跨核 False Sharing
     }
 };
 
-// 單顆馬達對應之多型別 Telemetry 靜態槽
 struct alignas(64) MotorSlot {
     SeqlockSlot<MITTelemetry>               mit_telemetry;
     SeqlockSlot<StandardMotionTelemetry>    motion_telemetry;
@@ -100,18 +111,19 @@ struct alignas(64) MotorSlot {
     SeqlockSlot<MotorModelTelemetry>        motor_model_telemetry;
     SeqlockSlot<WriteAckTelemetry>          write_ack_telemetry;
     
-    // 【第四層防禦】硬體/上位機 Fault 與 Cascade E-STOP 觸發標記
     std::atomic<bool> is_faulted{false};
 };
 
 /**
- * @brief 馬達狀態資料庫 (MotorStateDB) - 單例類別
+ * @brief 馬達狀態資料庫 (MotorStateDB) - 開放獨立實例
  */
 class MotorStateDB {
 public:
     static constexpr uint8_t MAX_MOTORS = 63;
 
-    static MotorStateDB& instance() noexcept;
+    // 開放 Public 建構與解構子
+    MotorStateDB() noexcept = default;
+    ~MotorStateDB() noexcept = default;
 
     MotorStateDB(const MotorStateDB&) = delete;
     MotorStateDB& operator=(const MotorStateDB&) = delete;
@@ -150,7 +162,8 @@ public:
     bool get_motor_model_telemetry(uint8_t motor_id, MotorModelTelemetry& out_data, double& out_timestamp) const noexcept;
     bool get_write_ack_telemetry(uint8_t motor_id, WriteAckTelemetry& out_data, double& out_timestamp) const noexcept;
 
-    bool is_telemetry_stale(uint8_t motor_id, double max_stale_sec = 0.3) const noexcept;
+    bool is_mit_telemetry_stale(uint8_t motor_id, double max_stale_sec = 0.3) const noexcept;
+    bool is_motion_telemetry_stale(uint8_t motor_id, double max_stale_sec = 0.3) const noexcept;
 
     void set_fault(uint8_t motor_id, bool faulted) noexcept;
     bool get_fault(uint8_t motor_id) const noexcept;
@@ -158,9 +171,6 @@ public:
     static double get_monotonic_time_sec() noexcept;
 
 private:
-    MotorStateDB() noexcept = default;
-    ~MotorStateDB() noexcept = default;
-
     static constexpr bool is_valid_motor_id(uint8_t motor_id) noexcept {
         return motor_id >= 1 && motor_id <= MAX_MOTORS;
     }

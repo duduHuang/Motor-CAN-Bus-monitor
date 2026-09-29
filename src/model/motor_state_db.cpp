@@ -4,11 +4,6 @@
 
 namespace robot::model {
 
-MotorStateDB& MotorStateDB::instance() noexcept {
-    static MotorStateDB db_instance;
-    return db_instance;
-}
-
 double MotorStateDB::get_monotonic_time_sec() noexcept {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -175,25 +170,43 @@ bool MotorStateDB::get_write_ack_telemetry(uint8_t motor_id, WriteAckTelemetry& 
 
 // === 【第四層防禦 API 實作】 ===
 
-bool MotorStateDB::is_telemetry_stale(uint8_t motor_id, double max_stale_sec) const noexcept {
-    if (!is_valid_motor_id(motor_id)) return true;
+bool MotorStateDB::is_mit_telemetry_stale(uint8_t motor_id, double max_stale_sec) const noexcept {
+    if (!is_valid_motor_id(motor_id) || max_stale_sec <= 0.0) return true;
 
-    MITTelemetry mit_data;
-    StandardMotionTelemetry motion_data;
-    double mit_ts = 0.0, motion_ts = 0.0;
-
-    bool has_mit = get_mit_telemetry(motor_id, mit_data, mit_ts);
-    bool has_motion = get_motion_telemetry(motor_id, motion_data, motion_ts);
-
-    // 修正：取兩者中最新更新的時間戳記進行比對
-    double latest_ts = std::max(mit_ts, motion_ts);
-
-    if (latest_ts <= 0.0) {
+    MITTelemetry data;
+    double timestamp = 0.0;
+    
+    // 檢查 read() 是否成功，且時間戳記大於 0
+    if (!get_mit_telemetry(motor_id, data, timestamp) || timestamp <= 0.0) {
         return true; 
     }
 
     double current_time = get_monotonic_time_sec();
-    return (current_time - latest_ts) > max_stale_sec;
+    
+    // 防護異常：若時間戳記位於「未來」(容許 1ms 的時鐘讀取誤差)，視為異常 stale
+    if (timestamp > current_time + 0.001) {
+        return true;
+    }
+    
+    return (current_time - timestamp) > max_stale_sec;
+}
+
+bool MotorStateDB::is_motion_telemetry_stale(uint8_t motor_id, double max_stale_sec) const noexcept {
+    if (!is_valid_motor_id(motor_id) || max_stale_sec <= 0.0) return true;
+
+    StandardMotionTelemetry data;
+    double timestamp = 0.0;
+    
+    if (!get_motion_telemetry(motor_id, data, timestamp) || timestamp <= 0.0) {
+        return true; 
+    }
+
+    double current_time = get_monotonic_time_sec();
+    if (timestamp > current_time + 0.001) {
+        return true;
+    }
+    
+    return (current_time - timestamp) > max_stale_sec;
 }
 
 void MotorStateDB::set_fault(uint8_t motor_id, bool faulted) noexcept {
