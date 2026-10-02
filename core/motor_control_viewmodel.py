@@ -99,7 +99,12 @@ class MotorControlViewModel:
         self._overspeed_counter: int = 0          # 連續過速幀數計數器
         self._pos_error_counter: int = 0      # [新增] 位置誤差連續計數器
         self._overload_counter: int = 0       # [新增] 扭矩過載連續計數器
+        # 將 Debounce 關閉，只要有一幀錯誤就立刻 E-STOP
+        # self.debounce_threshold: int = 1 # 3 # 連續 3 幀過速才判定為真實暴衝
         self.debounce_threshold: int = 3 # 連續 3 幀過速才判定為真實暴衝
+        # 將離群值剔除門檻設為極大值，徹底廢除雜訊 Spike 的免疫能力
+        # self.outlier_speed_threshold: float = 9999.0 # 30.0  # 離群值極限 (>30 rad/s 視為 CAN 電磁波 Spike 雜訊)
+        # self.outlier_pos_error_threshold: float = 9999.0 # 3.0 # [新增] 位置誤差離群極限 (>3.0 rad 視為 CAN Spike)
         self.outlier_speed_threshold: float = 30.0  # 離群值極限 (>30 rad/s 視為 CAN 電磁波 Spike 雜訊)
         self.outlier_pos_error_threshold: float = 3.0 # [新增] 位置誤差離群極限 (>3.0 rad 視為 CAN Spike)
 
@@ -141,6 +146,10 @@ class MotorControlViewModel:
     def select_provider(self, name: str, **kwargs) -> None:
         """透過 ProviderFactory 實例化指定的 TrajectoryProvider"""
         self._current_provider = ProviderFactory.create_provider(name, **kwargs)
+
+    def set_provider_instance(self, provider: BaseTrajectoryProvider) -> None:
+        """手動直接注入 TrajectoryProvider 實例"""
+        self._current_provider = provider
 
     def get_current_provider(self) -> Optional[BaseTrajectoryProvider]:
         """取得當前的 Provider (方便 UI 調用手動 API)"""
@@ -221,15 +230,17 @@ class MotorControlViewModel:
             return True
 
     def _disable_active_responses(self):
-        """內部方法：關閉主動回報"""
-        if self._controller:
-            try:
-                cmd_9c_off = MotorProtocol.set_active_response(0x9C, False, 0)
-                cmd_9a_off = MotorProtocol.set_active_response(0x9A, False, 0)
-                self._controller.send_single_command(self.motor_id, cmd_9c_off)
-                self._controller.send_single_command(self.motor_id, cmd_9a_off)
-            except Exception:
-                pass
+        """廠商建議廢棄 0xB6 主動回報設定，此處不再下發關閉指令"""
+        pass
+        # """內部方法：關閉主動回報"""
+        # if self._controller:
+        #     try:
+        #         cmd_9c_off = MotorProtocol.set_active_response(0x9C, False, 0)
+        #         cmd_9a_off = MotorProtocol.set_active_response(0x9A, False, 0)
+        #         self._controller.send_single_command(self.motor_id, cmd_9c_off)
+        #         self._controller.send_single_command(self.motor_id, cmd_9a_off)
+        #     except Exception:
+        #         pass
 
     def stop_control(self) -> None:
         """優雅停止控制迴圈"""
@@ -325,18 +336,20 @@ class MotorControlViewModel:
 
         self._notify_status_change(f"取得初始角度: {init_pos:.3f} rad | 啟動中...")
 
+        # --- [刪除原有的 0xB6 設定] ---
+        # """廠商建議廢棄 0xB6 主動回報設定，此處不再下發指令"""
         # === 新增：開啟主動回報 ===
-        if self._controller:
-            try:
-                # 0x9C (狀態2：電流/轉速), Enable=True, 10ms (1 * 10ms)
-                cmd_9c = MotorProtocol.set_active_response(0x9C, True, 1)
-                self._controller.send_single_command(self.motor_id, cmd_9c)
+        # if self._controller:
+        #     try:
+        #         # 0x9C (狀態2：電流/轉速), Enable=True, 10ms (1 * 10ms)
+        #         cmd_9c = MotorProtocol.set_active_response(0x9C, True, 1)
+        #         self._controller.send_single_command(self.motor_id, cmd_9c)
                 
-                # 0x9A (狀態1：電壓/溫度), Enable=True, 100ms (10 * 10ms)
-                cmd_9a = MotorProtocol.set_active_response(0x9A, True, 10)
-                self._controller.send_single_command(self.motor_id, cmd_9a)
-            except Exception as e:
-                print(f"啟動主動回報失敗: {e}")
+        #         # 0x9A (狀態1：電壓/溫度), Enable=True, 100ms (10 * 10ms)
+        #         cmd_9a = MotorProtocol.set_active_response(0x9A, True, 10)
+        #         self._controller.send_single_command(self.motor_id, cmd_9a)
+        #     except Exception as e:
+        #         print(f"啟動主動回報失敗: {e}")
         # ==========================
 
         with self._status_lock:
@@ -356,11 +369,13 @@ class MotorControlViewModel:
         period = 1.0 / self.control_freq_hz
         start_time = time.monotonic()
         next_time = start_time
+        loop_counter = 0  # 新增計數器用於低頻查詢
 
         while not self._stop_event.is_set():
             now = time.monotonic()
             elapsed_time = now - start_time
             hz_loop_count += 1
+            loop_counter += 1
             
             # 每 0.5 秒更新一次實測 Hz
             if now - hz_calc_time >= 0.5:
@@ -413,23 +428,44 @@ class MotorControlViewModel:
                 try:
                     payload = MotorProtocol.mit_control(p_des, v_des, kp, kd, t_ff)
                     self._controller.send_motion_command(self.motor_id, payload)
+                    tx_count += 1
                 except Exception as e:
                     self.trigger_estop(f"CAN TX Error: {e}")
                     return
 
-            # 提取 0x9A (溫度、電壓)
-            temp_c, volt_v = 0.0, 24.0 # 預設預設值
-            msg_9a = self._rx_worker.get_specific_telemetry(self.motor_id, "SensorStatus1Telemetry") if self._rx_worker else None
-            if msg_9a and msg_9a.telemetry:
-                temp_c = float(msg_9a.telemetry.temperature_c)
-                volt_v = float(msg_9a.telemetry.voltage_v)
+            # 每 10 週期 (10Hz) 由 Master 主動發一次 0x9C 查詢溫度/電流
+            if loop_counter % 10 == 0 and self._controller:
+                try:
+                    self._controller.send_single_command(self.motor_id, MotorProtocol.read_status_2())
+                except Exception:
+                    pass
 
-            # 提取 0x9C (電流、轉速)
+            # 每 100 週期 (1Hz) 由 Master 主動發一次 0x9A 查詢電壓/ Fault
+            if loop_counter % 100 == 0 and self._controller:
+                try:
+                    self._controller.send_single_command(self.motor_id, MotorProtocol.read_status_1())
+                except Exception:
+                    pass
+
+            temp_c, volt_v = 0.0, 24.0
             current_a, speed_dps = 0.0, 0.0
+
+            # 1. 優先從 0x9C (10Hz 高頻) 提取電流、速度與溫度
             msg_9c = self._rx_worker.get_specific_telemetry(self.motor_id, "StandardMotionTelemetry") if self._rx_worker else None
             if msg_9c and msg_9c.telemetry:
-                current_a = float(msg_9c.telemetry.iq_current_amp)
-                speed_dps = float(msg_9c.telemetry.speed_dps)
+                t_obj = msg_9c.telemetry
+                current_a = float(getattr(t_obj, 'iq_current_amp', getattr(t_obj, 'current', 0.0)))
+                speed_dps = float(getattr(t_obj, 'speed_dps', getattr(t_obj, 'speed', 0.0)))
+                # 從 0x9C 提取溫度 (相容 temperature 與 temperature_c 欄位名)
+                temp_c = float(getattr(t_obj, 'temperature', getattr(t_obj, 'temperature_c', 0.0)))
+
+            # 2. 再從 0x9A (1Hz 備用) 提取電壓與備用溫度
+            msg_9a = self._rx_worker.get_specific_telemetry(self.motor_id, "SensorStatus1Telemetry") if self._rx_worker else None
+            if msg_9a and msg_9a.telemetry:
+                t_obj = msg_9a.telemetry
+                volt_v = float(getattr(t_obj, 'voltage_v', getattr(t_obj, 'voltage', 24.0)))
+                if temp_c == 0.0:  # 若 0x9C 沒抓到溫度，用 0x9A 補上
+                    temp_c = float(getattr(t_obj, 'temperature_c', getattr(t_obj, 'temperature', 0.0)))
 
             # 抓取最新 Raw CAN Logs
             can_logs = []
@@ -513,9 +549,44 @@ class MotorControlViewModel:
         return None
 
     def _validate_safety(self, rx: TelemetryData, now: float, elapsed_time: float, p_des: float) -> bool:
-        """安全指標閥值檢查 (含 CAN 電磁雜訊離群值剔除與多重 Debounce 機制)"""
+        """安全指標閥值檢查 (含 CAN 電磁雜訊離群值剔除、多重 Debounce 機制與 E-STOP 詳細狀態傾印)"""
+
+        # =========================================================================
+        # 輔助函數：在觸發 E-STOP 瞬間，傾印記憶體與通訊細節以供除錯
+        # =========================================================================
+        def _dump_debug_info(fault_type: str):
+            print("\n" + "="*65)
+            print(f"\033[91m[DEBUG DUMP] E-STOP 觸發詳細狀態: {fault_type}\033[0m")
+            print(f"System Time: {now:.4f}, Control Elapsed: {elapsed_time:.4f} s")
+            print(f"Target (Cmd)   -> p_des: {p_des:.4f} rad")
+            print(f"Actual (Motor) -> p_act: {rx.p_act:.4f} rad, v_act: {rx.v_act:.4f} rad/s, torque_act: {rx.torque_act:.4f} Nm")
+            print(f"Calculated     -> pos_err: {abs(p_des - rx.p_act):.4f} rad")
+            
+            # 1. 提取並印出最後一筆引發異常的 Raw CAN Payload
+            if self._controller and self._controller.can_logger:
+                rx_logs = [log for log in self._controller.can_logger if log[1] == "RX"]
+                if rx_logs:
+                    ts, direction, cid, payload = rx_logs[-1]
+                    hex_payload = ' '.join(f"{b:02X}" for b in payload)
+                    print(f"\n[Raw CAN Data] ID=0x{cid:03X} DATA=[ {hex_payload} ] (Timestamp: {ts:.4f})")
+                else:
+                    print("\n[Raw CAN Data] No RX logs found in buffer.")
+            
+            # 2. 自動匯出事發前的歷史軌跡切片 (觀察單幀 Spike 特徵)
+            print("\n[History Trace] Last 5 Frames Before E-STOP:")
+            with self._history_lock:
+                history_slice = list(self._history_buffer)[-5:]
+                if not history_slice:
+                    print("  No history data available yet.")
+                for i, h in enumerate(history_slice):
+                    # history_buffer 結構: (elapsed_time, p_des, p_act, v_des, v_act, torque_act)
+                    print(f"  Frame {i - len(history_slice)}: t={h[0]:.4f}s | p_des={h[1]:.4f} | p_act={h[2]:.4f} | v_act={h[4]:.4f} | t_act={h[5]:.4f}")
+            print("="*65 + "\n")
+        # =========================================================================
+
         # 1. 通訊超時檢查
         if (now - rx.last_update_time) > self.telemetry_timeout_s:
+            _dump_debug_info("Communication Timeout")
             self.trigger_estop(f"Communication Timeout (> {self.telemetry_timeout_s}s)")
             return False
 
@@ -526,6 +597,7 @@ class MotorControlViewModel:
         elif v_act_abs > self.max_speed_rads:
             self._overspeed_counter += 1
             if self._overspeed_counter >= self.debounce_threshold:
+                _dump_debug_info(f"Overspeed: {rx.v_act:.2f} > {self.max_speed_rads}")
                 self.trigger_estop(f"[Overspeed Protection] {rx.v_act:.2f} rad/s > {self.max_speed_rads}")
                 return False
         else:
@@ -535,6 +607,7 @@ class MotorControlViewModel:
         if abs(rx.torque_act) > self.max_torque_nm:
             self._overload_counter += 1
             if self._overload_counter >= self.debounce_threshold:
+                _dump_debug_info(f"Overload: {rx.torque_act:.2f} > {self.max_torque_nm}")
                 self.trigger_estop(f"[Overload Protection] {rx.torque_act:.2f} Nm > {self.max_torque_nm}")
                 return False
         else:
@@ -545,11 +618,12 @@ class MotorControlViewModel:
             pos_err = abs(p_des - rx.p_act)
             
             if pos_err > self.outlier_pos_error_threshold:
-                # 離群過濾：10ms 內不可能發生 > 3.0 rad (~172°) 的位移跳變 (例如 10.129 rad)，判定為 CAN 雜訊 Spike，不計數直接丟棄
+                # 離群過濾：10ms 內不可能發生 > 3.0 rad (~172°) 的位移跳變，判定為 CAN 雜訊 Spike，不計數直接丟棄
                 pass
             elif pos_err > self.max_pos_error:
                 self._pos_error_counter += 1
                 if self._pos_error_counter >= self.debounce_threshold:
+                    _dump_debug_info(f"Position Error: {pos_err:.3f} > {self.max_pos_error}")
                     self.trigger_estop(f"[Position Error Protection] Following Error {pos_err:.3f} rad > {self.max_pos_error}")
                     return False
             else:
